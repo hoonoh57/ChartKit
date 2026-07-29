@@ -1,0 +1,41 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Visual Basic / .NET local user files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vbproj.user
+*.vbproj.user.*
+
+# Build and intermediate outputs
+bin/
+obj/
+.vs/
+.vscode/
+*.tmp
+*.log
+*.cache
+*.pdb
+*.mdb
+*.ncb
+*.ilk
+*.idb
+*.opendb
+*.aps
+*.tlog
+*.pch
+*.sdf
+
+# Package / restore artifacts
+packages/
+*.nupkg
+*.snupkg
+
+# Local runtime artifacts
+restore_log.txt
+run_error.txt

@@ -1,0 +1,20 @@
+﻿Namespace Abstractions
+    '' 지표 계산 결과 (캔들 1개 대응). 원본 IndicatorResult 그대로.
+    Public Class IndicatorResult
+        Public Property Name As String = ""
+        Public Property Index As Integer = 0
+        Public Property PanelIndex As Integer = 0
+        Public Property Values As New Dictionary(Of String, Single)
+
+        Public Function Val(key As String) As Single
+            If Values IsNot Nothing AndAlso Values.ContainsKey(key) Then Return Values(key)
+            Return Single.NaN
+        End Function
+
+        Public Overrides Function ToString() As String
+            If Values Is Nothing OrElse Values.Count = 0 Then Return $"{Name}[{Index}] (empty)"
+            Dim items = String.Join(", ", Values.Select(Function(kv) $"{kv.Key}={kv.Value:F2}"))
+            Return $"{Name}[{Index}] {items}"
+        End Function
+    End Class
+End Namespace
