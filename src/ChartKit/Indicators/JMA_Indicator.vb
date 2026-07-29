@@ -294,14 +294,14 @@ Namespace Indicators
             End If
 
             If curDir <> lPrevDir AndAlso lPrevDir <> 0 AndAlso prevResults IsNot Nothing AndAlso prevResults.Count > 1 Then
-                Dim prevR = prevResults(prevResults.Count - 2)
-                Dim prvV = prevR.Val("Value")
+                Dim prevR As IndicatorResult = Nothing
+                For k = prevResults.Count - 1 To 0 Step -1
+                    If prevResults(k).Index = i - 1 Then prevR = prevResults(k) : Exit For
+                Next
+                Dim prvV = If(prevR Is Nothing, Single.NaN, prevR.Val("Value"))
                 If Not Single.IsNaN(prvV) Then
-                    If curDir = 1 Then
-                        prevR.Values("Up") = prvV
-                    Else
-                        prevR.Values("Down") = prvV
-                    End If
+                    prevR.Values("Up") = prvV
+                    prevR.Values("Down") = prvV
                 End If
             End If
 
