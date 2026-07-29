@@ -91,11 +91,99 @@ Namespace Indicators
             Return results
         End Function
 
+        '' 증분 상태: 확정된 마지막 봉 기준
+        Private _stateIndex As Integer = -1
+        Private _ag As Single = 0
+        Private _al As Single = 0
+        Private _sigQ As New Queue(Of Single)()
+        Private _sigSum As Single = 0
+        '' 미확정봉 재갱신을 위한 직전 확정 스냅샷
+        Private _pAg As Single = 0
+        Private _pAl As Single = 0
+        Private _pSigQ As Single() = New Single() {}
+        Private _pSigSum As Single = 0
+
         Public Function UpdateLast(candles As IReadOnlyList(Of CandleItem), prevResults As List(Of IndicatorResult)) As IndicatorResult Implements IIndicator.UpdateLast
-            '' 단순화: 전체 재계산 후 마지막 반환 (Signal SMA 정합성 우선)
-            Dim full = Calculate(candles)
-            If full.Count > 0 Then Return full(full.Count - 1)
-            Dim r As New IndicatorResult With {.Name = Name, .Index = candles.Count - 1, .PanelIndex = PanelIndex,
+            Dim i = candles.Count - 1
+            If i < 0 Then Return NaNResult(0)
+
+            If _stateIndex = i - 1 Then
+                '' 새 봉 확정: 현재 상태를 스냅샷으로 남기고 한 스텝 전진
+                _pAg = _ag : _pAl = _al
+                _pSigQ = _sigQ.ToArray() : _pSigSum = _sigSum
+            ElseIf _stateIndex = i Then
+                '' 같은 봉 재갱신: 스냅샷에서 되돌린 뒤 다시 한 스텝
+                _ag = _pAg : _al = _pAl
+                _sigQ = New Queue(Of Single)(_pSigQ) : _sigSum = _pSigSum
+            Else
+                '' 상태 불일치(점프/최초): 전체 재계산으로 상태를 재구축
+                Return RebuildAndReturnLast(candles)
+            End If
+
+            Return StepOne(candles, i)
+        End Function
+
+        '' 상태(_ag,_al,_sigQ)를 i 봉으로 한 스텝 전진시키고 결과 반환
+        Private Function StepOne(candles As IReadOnlyList(Of CandleItem), i As Integer) As IndicatorResult
+            Dim rsi As Single = Single.NaN
+            If i < _period Then
+                rsi = Single.NaN
+            ElseIf i = _period Then
+                Dim sumG As Single = 0, sumL As Single = 0
+                For j = 1 To _period
+                    Dim d = candles(j).Close - candles(j - 1).Close
+                    If d > 0 Then sumG += d Else sumL += Math.Abs(d)
+                Next
+                _ag = sumG / _period
+                _al = sumL / _period
+                rsi = CalcRSI(_ag, _al)
+            Else
+                Dim diff = candles(i).Close - candles(i - 1).Close
+                Dim g As Single = 0, l As Single = 0
+                If diff > 0 Then g = diff Else l = Math.Abs(diff)
+                _ag = (_ag * (_period - 1) + g) / _period
+                _al = (_al * (_period - 1) + l) / _period
+                rsi = CalcRSI(_ag, _al)
+            End If
+
+            Dim sig As Single = Single.NaN
+            If Not Single.IsNaN(rsi) Then
+                _sigQ.Enqueue(rsi)
+                _sigSum += rsi
+                If _sigQ.Count > _signalPeriod Then _sigSum -= _sigQ.Dequeue()
+                If _sigQ.Count = _signalPeriod Then sig = _sigSum / _signalPeriod
+            End If
+
+            _stateIndex = i
+
+            Dim r As New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = PanelIndex,
+                .Values = New Dictionary(Of String, Single)}
+            r.Values("RSI") = rsi
+            r.Values("Signal") = sig
+            r.Values("Upper") = 70
+            r.Values("Lower") = 30
+            Return r
+        End Function
+
+        '' 상태를 처음부터 다시 쌓는다. 결과는 Calculate 와 동일해야 한다.
+        Private Function RebuildAndReturnLast(candles As IReadOnlyList(Of CandleItem)) As IndicatorResult
+            _ag = 0 : _al = 0
+            _sigQ = New Queue(Of Single)() : _sigSum = 0
+            _stateIndex = -1
+            Dim last As IndicatorResult = Nothing
+            For k = 0 To candles.Count - 1
+                If k = candles.Count - 1 Then
+                    _pAg = _ag : _pAl = _al
+                    _pSigQ = _sigQ.ToArray() : _pSigSum = _sigSum
+                End If
+                last = StepOne(candles, k)
+            Next
+            If last Is Nothing Then Return NaNResult(0)
+            Return last
+        End Function
+
+        Private Function NaNResult(idx As Integer) As IndicatorResult
+            Dim r As New IndicatorResult With {.Name = Name, .Index = idx, .PanelIndex = PanelIndex,
                 .Values = New Dictionary(Of String, Single)}
             r.Values("RSI") = Single.NaN
             r.Values("Signal") = Single.NaN
@@ -103,7 +191,6 @@ Namespace Indicators
             r.Values("Lower") = 30
             Return r
         End Function
-
         '' NaN을 건너뛰고 유효값이 period개 모이면 SMA 산출
         Private Shared Sub ComputeSma(src() As Single, dst() As Single, period As Integer, count As Integer)
             Dim q As New Queue(Of Single)()
