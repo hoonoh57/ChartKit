@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>ChartKit</RootNamespace>
+    <AssemblyName>ChartKit.Demo</AssemblyName>
+    <StartupObject>ChartKit.DemoProgram</StartupObject>
+    <OptionStrict>Off</OptionStrict>
+    <OptionInfer>On</OptionInfer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ChartKit\ChartKit.vbproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\.env.example" Link=".env.example">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\.env" Condition="Exists('..\..\.env')" Link=".env">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>
