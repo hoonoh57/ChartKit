@@ -1,11 +1,6 @@
-# 바이트 보존을 최우선으로 한다. git 의 자동 변환을 사용하지 않음.
+# 바이트 보존이 최우선. eol 정규화를 걸면 git add 시 인덱스가 재정규화되어
+# 실제 수정과 무관한 전체 파일 diff 가 발생한다. 그래서 text 속성을 쓰지 않는다.
 *               -text
-*.vb            text eol=crlf
-*.cs            text eol=crlf
-*.vbproj        text eol=crlf
-*.csproj        text eol=crlf
-*.sln           text eol=crlf
-*.ps1           text eol=crlf
-*.md            text eol=lf
-*.png binary
-*.ico binary
+*.png           binary
+*.ico           binary
+*.dll           binary
