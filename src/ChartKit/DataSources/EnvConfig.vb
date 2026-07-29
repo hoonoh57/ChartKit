@@ -10,9 +10,7 @@ Namespace DataSources
 
         '' .env 탐색: (1) 환경변수 CHARTKIT_ENV_PATH  (2) 고정 후보경로들
         ''            (3) 실행폴더에서 상위로 5단계
-        Private Shared ReadOnly _candidatePaths As String() = {
-            "E:\2026\gpt\vb\chart_base_trading\.env"
-        }
+        Private Shared ReadOnly _candidatePaths As String() = {}
 
         Public Shared Sub EnsureLoaded()
             If _loaded Then Return
@@ -83,6 +81,13 @@ Namespace DataSources
             Return dflt
         End Function
 
+        '' 전용키가 비어 있으면 공용키로 폴백. VB 2항 If 는 Nothing 만 판정하므로 별도 함수가 필요하다.
+        Friend Shared Function Pick(specific As String, common As String) As String
+            If Not String.IsNullOrWhiteSpace(specific) Then Return specific.Trim()
+            If common Is Nothing Then Return ""
+            Return common.Trim()
+        End Function
+
         Public Shared Function GetBool(key As String, Optional dflt As Boolean = False) As Boolean
             Dim v = [Get](key, "").Trim().ToLowerInvariant()
             If v = "" Then Return dflt
@@ -99,16 +104,16 @@ Namespace DataSources
         Public Shared ReadOnly Property AppKey As String
             Get
                 Dim common = [Get]("KIWOOM_APP_KEY", "")
-                If IsMock Then Return If([Get]("KIWOOM_MOCK_APP_KEY", ""), common).Trim()
-                Return If([Get]("KIWOOM_REAL_APP_KEY", ""), common).Trim()
+                If IsMock Then Return Pick([Get]("KIWOOM_MOCK_APP_KEY", ""), common)
+                Return Pick([Get]("KIWOOM_REAL_APP_KEY", ""), common)
             End Get
         End Property
 
         Public Shared ReadOnly Property SecretKey As String
             Get
                 Dim common = [Get]("KIWOOM_SECRET_KEY", "")
-                If IsMock Then Return If([Get]("KIWOOM_MOCK_SECRET_KEY", ""), common).Trim()
-                Return If([Get]("KIWOOM_REAL_SECRET_KEY", ""), common).Trim()
+                If IsMock Then Return Pick([Get]("KIWOOM_MOCK_SECRET_KEY", ""), common)
+                Return Pick([Get]("KIWOOM_REAL_SECRET_KEY", ""), common)
             End Get
         End Property
 
