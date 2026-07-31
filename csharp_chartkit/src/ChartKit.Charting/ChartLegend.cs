@@ -8,7 +8,8 @@ public readonly record struct ChartLegendEntry(
     string IndicatorName,
     string ValueKey,
     float Value,
-    bool HasValue);
+    bool HasValue,
+    bool IsIndicatorStart);
 
 public sealed class ChartLegendFrame
 {
@@ -44,6 +45,7 @@ public sealed class ChartLegendBuilder
         foreach (IndicatorSeriesSnapshot series in snapshot.Indicators)
         {
             IndicatorDescriptor descriptor = series.Descriptor;
+            bool firstVisibleValue = true;
             for (int valueIndex = 0;
                  valueIndex < descriptor.ValueCount;
                  valueIndex++)
@@ -63,7 +65,9 @@ public sealed class ChartLegendBuilder
                     descriptor.DisplayName,
                     descriptor.Keys[valueIndex],
                     value,
-                    float.IsFinite(value));
+                    float.IsFinite(value),
+                    firstVisibleValue);
+                firstVisibleValue = false;
                 colorIndex++;
             }
         }
