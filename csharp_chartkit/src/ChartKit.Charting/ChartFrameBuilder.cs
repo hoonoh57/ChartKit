@@ -10,7 +10,9 @@ public sealed class ChartFrameBuilder
         float width,
         float height,
         ChartLayoutOptions? options = null,
-        ChartFrame? target = null)
+        ChartFrame? target = null,
+        IPriceGrid? priceGrid = null,
+        ChartViewTransform? transform = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ChartLayoutOptions settings = options ?? ChartLayoutOptions.Default;
@@ -23,6 +25,7 @@ public sealed class ChartFrameBuilder
 
         ChartFrame frame = target ?? new ChartFrame();
         frame.Window = window;
+        frame.PriceGrid = priceGrid ?? KoreanEquityPriceGrid.Instance;
         frame.Bounds = new ChartRectF(0f, 0f, width, height);
         Array.Clear(frame.PanelVisible);
         Array.Clear(frame.PanelRects);
@@ -32,7 +35,11 @@ public sealed class ChartFrameBuilder
 
         int panelCount = ResolveVisiblePanels(snapshot, frame);
         ResolvePanelLayout(frame, settings, panelCount);
-        ResolveRanges(snapshot, frame);
+        ResolveRanges(
+            snapshot,
+            frame,
+            settings,
+            transform ?? ChartViewTransform.Default);
         ResolvePriceTicks(frame, settings.TargetPriceTickCount);
         ResolveTimeTicks(snapshot, frame, settings.TargetTimeTickCount);
         return frame;
@@ -88,11 +95,16 @@ public sealed class ChartFrameBuilder
             panelTop += panelHeight;
         }
 
-        frame.BarStep = frame.MainPanel.Width / Math.Max(1, frame.Window.Count);
+        frame.BarStep = frame.MainPanel.Width /
+                        Math.Max(1, frame.Window.VisibleSlotCount);
         frame.BodyWidth = Math.Max(1f, frame.BarStep * 0.72f);
     }
 
-    private static void ResolveRanges(SymbolSnapshot snapshot, ChartFrame frame)
+    private static void ResolveRanges(
+        SymbolSnapshot snapshot,
+        ChartFrame frame,
+        ChartLayoutOptions options,
+        ChartViewTransform transform)
     {
         float priceMinimum = float.MaxValue;
         float priceMaximum = float.MinValue;
@@ -107,16 +119,61 @@ public sealed class ChartFrameBuilder
             volumeMaximum = Math.Max(volumeMaximum, candle.Volume);
         }
 
+        // Overlay indicators share the price panel and must participate in the
+        // range calculation so neither candles nor overlays can hit the roof.
+        foreach (IndicatorSeriesSnapshot series in snapshot.Indicators)
+        {
+            if (series.Descriptor.PanelIndex != 0) continue;
+            int pointStart = Math.Min(frame.Window.StartIndex, series.Points.Length);
+            int pointEnd = Math.Min(frame.Window.EndExclusive, series.Points.Length);
+            for (int pointIndex = pointStart; pointIndex < pointEnd; pointIndex++)
+            {
+                IndicatorPoint point = series.Points[pointIndex];
+                for (int valueIndex = 0;
+                     valueIndex < series.Descriptor.ValueCount;
+                     valueIndex++)
+                {
+                    if (series.Descriptor.Kinds[valueIndex] == SeriesKind.Meta) continue;
+                    float value = point.GetValue(valueIndex);
+                    if (!float.IsFinite(value)) continue;
+                    priceMinimum = Math.Min(priceMinimum, value);
+                    priceMaximum = Math.Max(priceMaximum, value);
+                }
+            }
+        }
+
         if (priceMinimum == float.MaxValue || priceMaximum == float.MinValue)
         {
             priceMinimum = 0f;
             priceMaximum = 1f;
         }
-        float priceRange = priceMaximum - priceMinimum;
-        float priceMargin = Math.Max(0.01f, priceRange * 0.05f);
-        frame.PriceRange = new NumericRange(
-            priceMinimum - priceMargin,
-            priceMaximum + priceMargin);
+
+        IPriceGrid grid = frame.PriceGrid;
+        float rawRange = Math.Max(0f, priceMaximum - priceMinimum);
+        int referenceTick = grid.GetTickSize(Math.Max(priceMaximum, 0f));
+        float minimumMargin = Math.Max(
+            referenceTick,
+            referenceTick * options.MinimumPriceMarginTicks);
+        float basis = Math.Max(rawRange, minimumMargin);
+        float topMargin = Math.Max(
+            minimumMargin,
+            basis * options.PriceTopMarginRatio);
+        float bottomMargin = Math.Max(
+            minimumMargin,
+            basis * options.PriceBottomMarginRatio);
+
+        float minimum = priceMinimum - bottomMargin;
+        float maximum = priceMaximum + topMargin;
+        float span = Math.Max(referenceTick, maximum - minimum);
+        float shift = span * transform.PricePanFraction;
+        minimum += shift;
+        maximum += shift;
+        minimum = grid.Snap(Math.Max(0f, minimum), PriceSnapMode.Floor);
+        maximum = grid.Snap(Math.Max(minimum + referenceTick, maximum), PriceSnapMode.Ceiling);
+        if (maximum <= minimum)
+            maximum = minimum + referenceTick * 2f;
+
+        frame.PriceRange = new NumericRange(minimum, maximum);
         frame.VolumeMaximum = volumeMaximum;
 
         Span<float> minima = stackalloc float[ChartFrame.MaximumPanelIndex + 1];
@@ -152,37 +209,41 @@ public sealed class ChartFrameBuilder
         for (int panel = 1; panel <= ChartFrame.MaximumPanelIndex; panel++)
         {
             if (!frame.PanelVisible[panel]) continue;
-            float minimum = minima[panel];
-            float maximum = maxima[panel];
-            if (minimum == float.MaxValue || maximum == float.MinValue)
+            float panelMinimum = minima[panel];
+            float panelMaximum = maxima[panel];
+            if (panelMinimum == float.MaxValue || panelMaximum == float.MinValue)
             {
-                minimum = 0f;
-                maximum = 1f;
+                panelMinimum = 0f;
+                panelMaximum = 1f;
             }
-            float range = maximum - minimum;
+            float range = panelMaximum - panelMinimum;
             float margin = Math.Max(0.001f, range * 0.08f);
             frame.PanelRanges[panel] = new NumericRange(
-                minimum - margin,
-                maximum + margin);
+                panelMinimum - margin,
+                panelMaximum + margin);
         }
     }
 
     private static void ResolvePriceTicks(ChartFrame frame, int targetCount)
     {
         NumericRange range = frame.PriceRange;
-        double rawStep = range.Span / Math.Max(1, targetCount - 1);
-        double step = NiceStep(rawStep);
+        IPriceGrid grid = frame.PriceGrid;
+        float step = grid.SelectAxisStep(range, targetCount);
         double first = Math.Ceiling(range.Minimum / step) * step;
         int count = 0;
+        float previous = float.NaN;
         for (double value = first;
              value <= range.Maximum + step * 0.25d &&
              count < ChartFrame.MaximumAxisTickCount;
              value += step)
         {
-            float tickValue = (float)value;
+            float tickValue = grid.Snap((float)value, PriceSnapMode.Nearest);
+            if (float.IsFinite(previous) && tickValue <= previous) continue;
+            if (tickValue < range.Minimum || tickValue > range.Maximum) continue;
             frame.PriceTicks[count++] = new NumericAxisTick(
                 tickValue,
                 ChartFrame.MapY(tickValue, range, frame.MainPanel));
+            previous = tickValue;
         }
         frame.PriceTickCount = count;
     }
@@ -218,17 +279,5 @@ public sealed class ChartFrameBuilder
             previousCandleIndex = candleIndex;
         }
         frame.TimeTickCount = written;
-    }
-
-    private static double NiceStep(double rawStep)
-    {
-        if (!double.IsFinite(rawStep) || rawStep <= 0d) return 1d;
-        double magnitude = Math.Pow(10d, Math.Floor(Math.Log10(rawStep)));
-        double normalized = rawStep / magnitude;
-        double nice = normalized <= 1d ? 1d :
-                      normalized <= 2d ? 2d :
-                      normalized <= 2.5d ? 2.5d :
-                      normalized <= 5d ? 5d : 10d;
-        return nice * magnitude;
     }
 }
