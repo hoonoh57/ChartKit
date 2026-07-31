@@ -13,6 +13,8 @@ Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyTickAggregation", "Te
 EndProject
 Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyPanelLayout", "Tests\PanelLayoutVerification\VerifyPanelLayout.vbproj", "{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}"
 EndProject
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyIndicatorIdentity", "Tests\IndicatorIdentityVerification\VerifyIndicatorIdentity.vbproj", "{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
