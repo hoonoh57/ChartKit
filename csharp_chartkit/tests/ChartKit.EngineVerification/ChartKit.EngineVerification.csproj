@@ -6,5 +6,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ChartKit.Contracts\ChartKit.Contracts.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Engine\ChartKit.Engine.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Rendering\ChartKit.Rendering.csproj" />
   </ItemGroup>
 </Project>
