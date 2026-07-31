@@ -138,7 +138,7 @@ internal static class KiwoomHistoryVerification
                 $"Paged history did not return the requested count: {candles.Count}.");
         if (candles[0].Close != 51f || candles[^1].Close != 300f)
             throw new InvalidOperationException("Paged history tail selection failed.");
-        if (candles[0].Sequence != 0 || candles[^1].Sequence != 249)
+        if (candles[0].Sequence != 50 || candles[^1].Sequence != 299)
             throw new InvalidOperationException("Paged history sequence mapping failed.");
 
         HttpCall[] calls = handler.Calls
