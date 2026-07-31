@@ -24,34 +24,56 @@ public static class TickCandleAggregator
         if (baseTicks <= 0) throw new ArgumentOutOfRangeException(nameof(baseTicks));
         if (targetTicks % baseTicks != 0)
             throw new ArgumentException("Target ticks must be divisible by base ticks.");
-        ValidateAscending(source);
 
+        IReadOnlyList<Candle> ordered = EnsureAscending(source);
         var output = new List<Candle>();
-        if (source.Count == 0) return output;
+        if (ordered.Count == 0) return output;
         int groupSize = targetTicks / baseTicks;
         if (groupSize == 1)
         {
-            output.AddRange(source);
+            output.AddRange(ordered);
             return output;
         }
 
         int dayStart = 0;
-        for (int index = 1; index <= source.Count; index++)
+        for (int index = 1; index <= ordered.Count; index++)
         {
-            bool end = index == source.Count;
-            bool dateChanged = !end && source[index].TradingDate != source[dayStart].TradingDate;
+            bool end = index == ordered.Count;
+            bool dateChanged = !end &&
+                ordered[index].TradingDate != ordered[dayStart].TradingDate;
             if (!end && !dateChanged) continue;
-            AggregateDay(source, dayStart, index - 1, groupSize, output);
+            AggregateDay(ordered, dayStart, index - 1, groupSize, output);
             dayStart = index;
         }
         return output;
     }
 
-    private static void ValidateAscending(IReadOnlyList<Candle> source)
+    private static IReadOnlyList<Candle> EnsureAscending(
+        IReadOnlyList<Candle> source)
     {
+        int inversion = -1;
         for (int index = 1; index < source.Count; index++)
-            if (source[index].CloseTime < source[index - 1].CloseTime)
-                throw new ArgumentException("Base tick candles must be ascending.", nameof(source));
+        {
+            if (CompareChronology(source[index - 1], source[index]) <= 0) continue;
+            inversion = index;
+            break;
+        }
+        if (inversion < 0) return source;
+
+        var ordered = new List<Candle>(source.Count);
+        for (int index = 0; index < source.Count; index++)
+            ordered.Add(source[index]);
+        ordered.Sort(static (left, right) => CompareChronology(left, right));
+        return ordered;
+    }
+
+    private static int CompareChronology(Candle left, Candle right)
+    {
+        int result = left.CloseTime.CompareTo(right.CloseTime);
+        if (result != 0) return result;
+        result = left.OpenTime.CompareTo(right.OpenTime);
+        if (result != 0) return result;
+        return left.Sequence.CompareTo(right.Sequence);
     }
 
     private static void AggregateDay(
