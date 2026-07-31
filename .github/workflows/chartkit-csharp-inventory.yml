@@ -7,6 +7,13 @@ on:
     paths:
       - 'csharp_chartkit/migration/LegacyInventory/**'
       - '.github/workflows/chartkit-csharp-inventory.yml'
+  pull_request:
+    branches:
+      - improve/chart-engine-hardening
+      - main
+    paths:
+      - 'csharp_chartkit/migration/LegacyInventory/**'
+      - '.github/workflows/chartkit-csharp-inventory.yml'
   workflow_dispatch:
 
 jobs:
