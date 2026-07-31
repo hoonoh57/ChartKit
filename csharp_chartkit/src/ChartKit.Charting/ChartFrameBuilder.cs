@@ -30,6 +30,7 @@ public sealed class ChartFrameBuilder
         Array.Clear(frame.PanelVisible);
         Array.Clear(frame.PanelRects);
         Array.Clear(frame.PanelRanges);
+        Array.Clear(frame.PanelTickCounts);
         frame.PriceTickCount = 0;
         frame.TimeTickCount = 0;
 
@@ -41,6 +42,7 @@ public sealed class ChartFrameBuilder
             settings,
             transform ?? ChartViewTransform.Default);
         ResolvePriceTicks(frame, settings.TargetPriceTickCount);
+        ResolvePanelTicks(frame, settings.TargetPanelTickCount);
         ResolveTimeTicks(snapshot, frame, settings.TargetTimeTickCount);
         return frame;
     }
@@ -246,6 +248,55 @@ public sealed class ChartFrameBuilder
             previous = tickValue;
         }
         frame.PriceTickCount = count;
+    }
+
+    private static void ResolvePanelTicks(ChartFrame frame, int targetCount)
+    {
+        for (int panel = 1; panel <= ChartFrame.MaximumPanelIndex; panel++)
+        {
+            if (!frame.PanelVisible[panel]) continue;
+            NumericRange range = frame.PanelRanges[panel];
+            ChartRectF rect = frame.PanelRects[panel];
+            if (!range.IsValid || rect.IsEmpty) continue;
+
+            double rawStep = range.Span / Math.Max(1, targetCount - 1);
+            double step = NiceStep(rawStep);
+            double first = Math.Ceiling(range.Minimum / step) * step;
+            int count = 0;
+            float previous = float.NaN;
+            for (double value = first;
+                 value <= range.Maximum + step * 0.25d &&
+                 count < ChartFrame.MaximumAxisTickCount;
+                 value += step)
+            {
+                float tickValue = (float)value;
+                if (!float.IsFinite(tickValue) ||
+                    tickValue < range.Minimum || tickValue > range.Maximum)
+                    continue;
+                if (float.IsFinite(previous) && tickValue <= previous) continue;
+
+                frame.SetPanelTick(
+                    panel,
+                    count++,
+                    new NumericAxisTick(
+                        tickValue,
+                        ChartFrame.MapY(tickValue, range, rect)));
+                previous = tickValue;
+            }
+            frame.PanelTickCounts[panel] = count;
+        }
+    }
+
+    private static double NiceStep(double rawStep)
+    {
+        if (!double.IsFinite(rawStep) || rawStep <= 0d) return 1d;
+        double magnitude = Math.Pow(10d, Math.Floor(Math.Log10(rawStep)));
+        double normalized = rawStep / magnitude;
+        double nice = normalized <= 1d ? 1d :
+                      normalized <= 2d ? 2d :
+                      normalized <= 2.5d ? 2.5d :
+                      normalized <= 5d ? 5d : 10d;
+        return nice * magnitude;
     }
 
     private static void ResolveTimeTicks(
