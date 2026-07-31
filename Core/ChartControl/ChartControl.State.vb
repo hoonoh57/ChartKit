@@ -1,4 +1,4 @@
-Imports System.Linq
+﻿Imports System.Linq
 
 Namespace Core
     Public Partial Class ChartControl
@@ -39,7 +39,7 @@ Namespace Core
             Next
             For Each ind In _indicatorEngine.GetAll()
                 Dim isr As New IndicatorState With {
-                    .TypeName = ind.GetType().AssemblyQualifiedName,
+                    .TypeName = IndicatorIdentity.SourceTypeName(ind),
                     .Params = New Dictionary(Of String, String)}
                 If ind.Parameters IsNot Nothing Then
                     For Each kv In ind.Parameters
