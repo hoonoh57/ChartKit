@@ -15,21 +15,48 @@ permissions:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Restore CSharp verification
-        run: dotnet restore .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj
-      - name: Build CSharp verification
-        run: dotnet build .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj -c Release --no-restore
+
+      - name: Verify CSharp product boundary
+        shell: pwsh
+        run: |
+          $invalid = Get-ChildItem .\csharp_chartkit\src -Recurse -Filter *.csproj |
+            Select-String -Pattern '\.vbproj|ChartKit\.vbproj'
+          if ($invalid) {
+            $invalid | ForEach-Object { Write-Error $_.Line }
+            throw 'CSharp product projects must not reference VB projects.'
+          }
+          $solution = Get-Content .\csharp_chartkit\ChartKit.CSharp.sln -Raw
+          if ($solution -match '\.vbproj|LegacyParity') {
+            throw 'CSharp product solution contains a migration-only dependency.'
+          }
+          Write-Host 'csharp_product_boundary=PASS'
+
+      - name: Restore CSharp product solution
+        run: dotnet restore .\csharp_chartkit\ChartKit.CSharp.sln
+      - name: Build CSharp product solution
+        run: dotnet build .\csharp_chartkit\ChartKit.CSharp.sln -c Release --no-restore
       - name: Run CSharp verification
         run: dotnet run --project .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj -c Release --no-build
-      - name: Restore CSharp application
-        run: dotnet restore .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj
-      - name: Build CSharp application
-        run: dotnet build .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-restore
       - name: Run CSharp application self-test
         run: dotnet run --project .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-build -- --self-test --count 120
+
+      - name: Restore legacy parity verifier
+        run: dotnet restore .\csharp_chartkit\migration\LegacyParity\LegacyParity.csproj
+      - name: Build legacy parity verifier
+        run: dotnet build .\csharp_chartkit\migration\LegacyParity\LegacyParity.csproj -c Release --no-restore
+      - name: Run legacy parity verifier
+        run: dotnet run --project .\csharp_chartkit\migration\LegacyParity\LegacyParity.csproj -c Release --no-build
+
+      - name: Publish standalone CSharp application
+        run: dotnet publish .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-restore -o .\artifacts\ChartKit.CSharp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChartKit-CSharp-Windows
+          path: .\artifacts\ChartKit.CSharp
+          if-no-files-found: error
