@@ -1,4 +1,4 @@
-Option Strict On
+﻿Option Strict On
 Option Explicit On
 Option Infer Off
 
@@ -271,7 +271,8 @@ Namespace DataSources
             End If
 
             Dim baseDelay As Integer = Math.Max(1100, _options.MinRequestIntervalMs)
-            Return checked(baseDelay * (attempt + 1))
+            Dim delayValue As Long = CLng(baseDelay) * CLng(attempt + 1)
+            Return CInt(Math.Min(CLng(Integer.MaxValue), delayValue))
         End Function
 
         Private Function ResolveTokenExpiry(root As JsonElement,

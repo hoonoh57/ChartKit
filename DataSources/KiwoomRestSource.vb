@@ -18,10 +18,8 @@ Namespace DataSources
     Public Class KiwoomRestSource
         Implements ICandleDataSource
 
-        Private Shared ReadOnly _http As New HttpClient()
+        Private ReadOnly _apiSession As KiwoomApiSession
         Private ReadOnly _sync As New Object()
-        Private _token As String = Nothing
-        Private _lastCallTicks As Long = 0
         Private _lastTicCount As Integer = 0
         Private _realtimeCts As CancellationTokenSource
         Private _realtimeSocket As ClientWebSocket
@@ -44,9 +42,6 @@ Namespace DataSources
         Private _historyBaseCandles As New List(Of CandleItem)
         Private _historyEarliest As DateTime = DateTime.MaxValue
         '' 국내주식 조회 TR: 실서버 초당 5회, 모의서버는 TR별 초당 1회.
-        Private Const RealMinIntervalMs As Integer = 220
-        Private Const MockMinIntervalMs As Integer = 1100
-        Private Const MaxRateLimitRetries As Integer = 4
 
         Public ReadOnly Property Name As String Implements ICandleDataSource.Name
             Get
@@ -57,102 +52,32 @@ Namespace DataSources
         Public Event CandleAppended As EventHandler(Of CandleAppendedEventArgs) Implements ICandleDataSource.CandleAppended
         Public Event CandleUpdated As EventHandler(Of CandleUpdatedEventArgs) Implements ICandleDataSource.CandleUpdated
 
-        '' ── 토큰 발급 (POST /oauth2/token, JSON, 응답 token) ──
-        Private Sub EnsureToken()
-            If Not String.IsNullOrEmpty(_token) Then Return
-            Dim ak = EnvConfig.AppKey, sk = EnvConfig.SecretKey
-            If String.IsNullOrEmpty(ak) OrElse String.IsNullOrEmpty(sk) Then
-                Throw New InvalidOperationException("키움 API 키 없음. .env 에 KIWOOM_APP_KEY / KIWOOM_SECRET_KEY (또는 REAL/MOCK) 설정 필요.")
-            End If
-            Dim url = EnvConfig.RestHost & "/oauth2/token"
-            Dim body = JsonSerializer.Serialize(New Dictionary(Of String, String) From {
-                {"grant_type", "client_credentials"}, {"appkey", ak}, {"secretkey", sk}})
-            Using req As New HttpRequestMessage(HttpMethod.Post, url)
-                req.Content = New StringContent(body, Encoding.UTF8, "application/json")
-                Dim resp = _http.SendAsync(req).GetAwaiter().GetResult()
-                resp.EnsureSuccessStatusCode()
-                Dim json = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                Using doc = JsonDocument.Parse(json)
-                    Dim el As JsonElement
-                    If doc.RootElement.TryGetProperty("token", el) Then
-                        _token = el.GetString()
-                    ElseIf doc.RootElement.TryGetProperty("access_token", el) Then
-                        _token = el.GetString()
-                    End If
-                End Using
-            End Using
-            If String.IsNullOrEmpty(_token) Then Throw New InvalidOperationException("토큰 발급 실패")
+        Public Sub New()
+            Me.New(KiwoomApiSessionProvider.GetDefault())
         End Sub
 
-        Private Sub Throttle()
-            SyncLock _sync
-                Dim minIntervalMs = If(EnvConfig.IsMock, MockMinIntervalMs, RealMinIntervalMs)
-                Dim now = Environment.TickCount64
-                Dim wait = minIntervalMs - CInt(now - _lastCallTicks)
-                If wait > 0 Then Thread.Sleep(wait)
-                _lastCallTicks = Environment.TickCount64
-            End SyncLock
+        Public Sub New(apiSession As KiwoomApiSession)
+            If apiSession Is Nothing Then Throw New ArgumentNullException(NameOf(apiSession))
+            _apiSession = apiSession
         End Sub
 
-        '' ── 공통 호출 (api-id / cont-yn / next-key 헤더) ──
-        '' 반환: (JsonDocument, contYn, nextKey)
-        Private Function CallApi(path As String, apiId As String, body As String,
-                              contYn As String, nextKey As String,
-                              ByRef outCont As String, ByRef outNext As String) As JsonDocument
-            EnsureToken()
-            Dim url = EnvConfig.RestHost & path
-            For attempt = 0 To MaxRateLimitRetries
-                Throttle()
-                Using req As New HttpRequestMessage(HttpMethod.Post, url)
-                    req.Content = New StringContent(body, Encoding.UTF8, "application/json")
-                    req.Headers.TryAddWithoutValidation("authorization", "Bearer " & _token)
-                    req.Headers.TryAddWithoutValidation("api-id", apiId)
-                    req.Headers.TryAddWithoutValidation("cont-yn", If(contYn, "N"))
-                    req.Headers.TryAddWithoutValidation("next-key", If(nextKey, ""))
-                    Using resp = _http.SendAsync(req).GetAwaiter().GetResult()
-                        Dim json = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                        If resp.StatusCode = HttpStatusCode.TooManyRequests AndAlso attempt < MaxRateLimitRetries Then
-                            Dim retryMs = GetRetryDelayMs(resp, attempt)
-                            ChartLog.Info(
-                                $"[KIWOOM] 429 api-id={apiId}, retry={attempt + 1}/{MaxRateLimitRetries}, wait={retryMs}ms")
-                            Thread.Sleep(retryMs)
-                            Continue For
-                        End If
-                        If Not resp.IsSuccessStatusCode Then
-                            Throw New HttpRequestException(
-                                $"Kiwoom {apiId} failed: HTTP {CInt(resp.StatusCode)} {resp.ReasonPhrase}; body={json}",
-                                Nothing, resp.StatusCode)
-                        End If
-                        outCont = HeaderOrDefault(resp, "cont-yn", "N")
-                        outNext = HeaderOrDefault(resp, "next-key", "")
-                        Return JsonDocument.Parse(json)
-                    End Using
-                End Using
-            Next
-            Throw New HttpRequestException($"Kiwoom {apiId} failed after rate-limit retries.")
+        '' ── 공통 호출: 인증·전역 throttle·재시도는 KiwoomApiSession이 담당 ──
+        Private Function CallApi(path As String,
+                                 apiId As String,
+                                 body As String,
+                                 contYn As String,
+                                 nextKey As String,
+                                 ByRef outCont As String,
+                                 ByRef outNext As String) As JsonDocument
+            Return _apiSession.PostJson(
+                path,
+                apiId,
+                body,
+                contYn,
+                nextKey,
+                outCont,
+                outNext)
         End Function
-
-        Private Shared Function GetRetryDelayMs(resp As HttpResponseMessage, attempt As Integer) As Integer
-            If resp.Headers.RetryAfter IsNot Nothing Then
-                If resp.Headers.RetryAfter.Delta.HasValue Then
-                    Return Math.Max(1100, CInt(Math.Ceiling(resp.Headers.RetryAfter.Delta.Value.TotalMilliseconds)))
-                End If
-                If resp.Headers.RetryAfter.Date.HasValue Then
-                    Dim ms = (resp.Headers.RetryAfter.Date.Value - DateTimeOffset.Now).TotalMilliseconds
-                    If ms > 0 Then Return Math.Max(1100, CInt(Math.Ceiling(ms)))
-                End If
-            End If
-            Return 1100 * (attempt + 1)
-        End Function
-
-        Private Shared Function HeaderOrDefault(resp As HttpResponseMessage, key As String, dflt As String) As String
-            Dim vals As IEnumerable(Of String) = Nothing
-            If resp.Headers.TryGetValues(key, vals) Then
-                For Each v In vals : Return v : Next
-            End If
-            Return dflt
-        End Function
-
         '' 연속조회 안전 상한. 실제 종료 조건은 maxRows 충족 또는 cont-yn=N 이다.
         '' 페이지당 행 수는 TR/서버 상태에 따라 달라지므로 900행 같은 추정치로
         '' 호출 횟수를 제한하면 큰 틱봉(예: 720틱)이 요청 수보다 적게 잘린다.
@@ -473,7 +398,7 @@ Namespace DataSources
             Dim isMinuteInterval = intervalValue >= 1 AndAlso intervalValue <= 60
             If Not isTickInterval AndAlso Not isMinuteInterval Then Return
 
-            EnsureToken()
+            Dim ignoredAccessToken As String = _apiSession.GetAccessToken()
             _realtimeSymbol = If(String.IsNullOrWhiteSpace(req.Symbol), EnvConfig.DefaultSymbol, req.Symbol.Trim())
             If isTickInterval Then
                 _realtimeTargetTicks = intervalValue - 3000
@@ -539,6 +464,7 @@ Namespace DataSources
         End Function
 
         Private Async Function RunRealtimeSessionAsync(cancel As CancellationToken) As Task
+            Dim accessToken As String = _apiSession.GetAccessToken()
             Dim ws As New ClientWebSocket()
             _realtimeSocket = ws
             Dim host = If(EnvConfig.IsMock, "mockapi.kiwoom.com", "api.kiwoom.com")
@@ -546,7 +472,7 @@ Namespace DataSources
             Await ws.ConnectAsync(uri, cancel)
 
             Await SendWebSocketJsonAsync(ws, New Dictionary(Of String, Object) From {
-                {"trnm", "LOGIN"}, {"token", _token}}, cancel)
+                {"trnm", "LOGIN"}, {"token", accessToken}}, cancel)
 
             While ws.State = WebSocketState.Open AndAlso Not cancel.IsCancellationRequested
                 Dim json = Await ReceiveWebSocketTextAsync(ws, cancel)
@@ -558,6 +484,7 @@ Namespace DataSources
                         Case "LOGIN"
                             Dim resultCode = ReadRootInt(root, "return_code")
                             If resultCode <> 0 Then
+                                _apiSession.InvalidateToken(accessToken)
                                 Throw New InvalidOperationException(
                                     "키움 WebSocket 로그인 실패: " & JsonString(root, "return_msg"))
                             End If
