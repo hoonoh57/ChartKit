@@ -9,16 +9,16 @@ using SkiaSharp.Views.Desktop;
 
 namespace ChartKit.CSharp.App;
 
-internal sealed class MainForm : Form
+internal sealed partial class MainForm : Form
 {
     private readonly AppOptions _options;
     private readonly IMarketDataSource _source;
     private readonly MultiSymbolEngine _engine;
     private readonly ChartViewport _viewport;
+    private readonly ChartWorkspaceState _workspace;
     private readonly ChartFrameBuilder _frameBuilder = new();
     private readonly ChartFrame _chartFrame = new();
     private readonly ChartLayoutOptions _layoutOptions = new();
-    private readonly ChartRenderOptions _renderOptions = new(ShowText: true, ShowAxes: true);
     private readonly ChartCursorController _cursor = new();
     private readonly ChartLegendBuilder _legendBuilder = new();
     private readonly ChartLegendFrame _legendFrame = new();
@@ -26,13 +26,17 @@ internal sealed class MainForm : Form
     private readonly ChartLegendRenderer _legendRenderer = new();
     private readonly ChartCrosshairRenderer _crosshairRenderer = new();
     private readonly CancellationTokenSource _stop = new();
-    private readonly ComboBox _symbols = new();
-    private readonly Label _status = new();
+    private readonly SemaphoreSlim _reloadGate = new(1, 1);
+    private readonly Dictionary<string, InstrumentMetadata> _metadataCache =
+        new(StringComparer.Ordinal);
     private readonly SkiaSharp.Views.Desktop.SKControl _chart = new();
     private readonly System.Windows.Forms.Timer _frameTimer = new();
+    private CancellationTokenSource? _streamStop;
     private Task? _streamTask;
+    private InstrumentMetadata? _selectedMetadata;
     private string _selectedSymbol;
     private long _lastVersion = -1;
+    private long _lastShellUpdateMilliseconds;
     private bool _dragging;
     private bool _draggingPricePanel;
     private int _lastDragX;
@@ -45,8 +49,10 @@ internal sealed class MainForm : Form
         _options = options;
         _source = source;
         _selectedSymbol = options.Symbols[0];
+        int initialBars = Math.Clamp(options.HistoryCount, 20, 240);
+        _workspace = new ChartWorkspaceState(options.Timeframe, initialBars);
         _viewport = new ChartViewport(
-            visibleBars: Math.Clamp(options.HistoryCount, 20, 240),
+            visibleBars: initialBars,
             minimumVisibleBars: 20,
             maximumVisibleBars: 5_000,
             rightBlankBars: 12,
@@ -55,7 +61,7 @@ internal sealed class MainForm : Form
             WorkerCount: 0,
             QueueCapacityPerWorker: 8192,
             CandleCapacity: 100_000,
-            SnapshotBars: Math.Max(600, options.HistoryCount),
+            SnapshotBars: Math.Max(5_000, options.HistoryCount),
             SnapshotInterval: TimeSpan.FromMilliseconds(50)));
 
         Text = $"ChartKit C# - {_source.Name}";
@@ -63,37 +69,6 @@ internal sealed class MainForm : Form
         Height = 900;
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(900, 600);
-
-        var toolbar = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 38,
-            Padding = new Padding(8, 5, 8, 5)
-        };
-        _symbols.DropDownStyle = ComboBoxStyle.DropDownList;
-        _symbols.Width = 150;
-        _symbols.Items.AddRange(options.Symbols.Cast<object>().ToArray());
-        _symbols.SelectedIndex = 0;
-        _symbols.SelectedIndexChanged += (_, _) =>
-        {
-            if (_symbols.SelectedItem is string symbol)
-            {
-                _selectedSymbol = symbol;
-                _lastVersion = -1;
-                _cursor.Clear();
-                if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
-                    _viewport.Reset(snapshot.Candles.Length);
-                _chart.Focus();
-                _chart.Invalidate();
-            }
-        };
-
-        _status.AutoSize = true;
-        _status.Left = 170;
-        _status.Top = 9;
-        _status.Text = "Initializing C# engine...";
-        toolbar.Controls.Add(_symbols);
-        toolbar.Controls.Add(_status);
 
         _chart.Dock = DockStyle.Fill;
         _chart.BackColor = Color.Black;
@@ -106,8 +81,9 @@ internal sealed class MainForm : Form
         _chart.MouseMove += OnChartMouseMove;
         _chart.MouseUp += OnChartMouseUp;
         _chart.MouseDoubleClick += OnChartMouseDoubleClick;
-        Controls.Add(_chart);
-        Controls.Add(toolbar);
+
+        InitializeShell(options.Symbols);
+        SynchronizeShellChecks();
 
         _frameTimer.Interval = 16;
         _frameTimer.Tick += OnFrame;
@@ -118,7 +94,11 @@ internal sealed class MainForm : Form
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         Keys keyCode = keyData & Keys.KeyCode;
-        if (!_symbols.Focused && HandleNavigationKey(keyCode)) return true;
+        if (!_symbolSelector.Focused &&
+            !_timeframeSelector.Focused &&
+            !_visibleBarsSelector.Focused &&
+            HandleNavigationKey(keyCode))
+            return true;
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
@@ -126,53 +106,114 @@ internal sealed class MainForm : Form
     {
         try
         {
-            _status.Text = "Loading C# history...";
-            foreach (string symbol in _options.Symbols)
-            {
-                IReadOnlyList<Candle> history = await _source.GetHistoryAsync(
-                    new HistoryRequest(
-                        symbol,
-                        _options.Timeframe,
-                        _options.HistoryCount),
-                    _stop.Token);
-                await _engine.LoadHistoryAsync(symbol, history, _stop.Token);
-            }
-
-            if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
-                _viewport.Reset(snapshot.Candles.Length);
-            _status.Text = "C# realtime running";
-            _frameTimer.Start();
+            await ReloadAsync(_workspace.Timeframe);
             _chart.Focus();
-            _streamTask = Task.Run(PumpRealtimeAsync, CancellationToken.None);
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            _status.Text = "Start failed: " + exception.Message;
-            MessageBox.Show(
-                this,
-                exception.ToString(),
-                "ChartKit C# start failure",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+            ShowFailure("ChartKit C# start failure", exception);
         }
     }
 
-    private async Task PumpRealtimeAsync()
+    private async Task ReloadAsync(CandleTimeframe timeframe)
+    {
+        await _reloadGate.WaitAsync(_stop.Token);
+        try
+        {
+            _frameTimer.Stop();
+            await StopStreamAsync();
+            timeframe.Validate();
+            _workspace.SetTimeframe(timeframe);
+            SynchronizeShellChecks();
+            _statusLabel.Text = $"{timeframe} 과거봉 조회 중...";
+
+            foreach (string symbol in _options.Symbols)
+            {
+                IReadOnlyList<Candle> history = await _source.GetHistoryAsync(
+                    new HistoryRequest(
+                        symbol,
+                        timeframe,
+                        _options.HistoryCount),
+                    _stop.Token);
+                await _engine.LoadHistoryAsync(symbol, history, _stop.Token);
+            }
+
+            _lastVersion = -1;
+            _cursor.Clear();
+            if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+            {
+                _viewport.Reset(snapshot.Candles.Length);
+                _viewport.SetVisibleBars(
+                    _workspace.RequestedVisibleBars,
+                    snapshot.Candles.Length,
+                    followLatest: true);
+            }
+            await RefreshSelectedMetadataAsync();
+
+            if (SupportsRealtime(timeframe))
+            {
+                _streamStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                CancellationToken streamToken = _streamStop.Token;
+                _streamTask = PumpRealtimeAsync(timeframe, streamToken);
+                _statusLabel.Text = $"{timeframe} 실시간 연결";
+            }
+            else
+            {
+                _statusLabel.Text = $"{timeframe} 과거 차트";
+            }
+
+            _frameTimer.Start();
+            _chart.Invalidate();
+        }
+        finally
+        {
+            _reloadGate.Release();
+        }
+    }
+
+    private static bool SupportsRealtime(CandleTimeframe timeframe) =>
+        timeframe.Unit is CandleUnit.Minute or CandleUnit.Tick;
+
+    private async Task StopStreamAsync()
+    {
+        CancellationTokenSource? streamStop = _streamStop;
+        Task? streamTask = _streamTask;
+        _streamStop = null;
+        _streamTask = null;
+        if (streamStop is null) return;
+
+        streamStop.Cancel();
+        if (streamTask is not null)
+        {
+            try
+            {
+                await streamTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+        streamStop.Dispose();
+    }
+
+    private async Task PumpRealtimeAsync(
+        CandleTimeframe timeframe,
+        CancellationToken cancellationToken)
     {
         try
         {
             await foreach (CandleEvent value in _source.StreamAsync(
                                _options.Symbols,
-                               _options.Timeframe,
-                               _stop.Token))
+                               timeframe,
+                               cancellationToken))
             {
-                await _engine.PublishAsync(value, _stop.Token);
+                await _engine.PublishAsync(value, cancellationToken);
             }
         }
-        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
@@ -181,35 +222,110 @@ internal sealed class MainForm : Form
             {
                 BeginInvoke(() =>
                 {
-                    _status.Text = "Realtime failed: " + exception.Message;
+                    _statusLabel.Text = "실시간 오류: " + exception.Message;
                 });
             }
         }
     }
 
+    private async Task ChangeTimeframeAsync(CandleTimeframe timeframe)
+    {
+        if (timeframe == _workspace.Timeframe) return;
+        try
+        {
+            await ReloadAsync(timeframe);
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            SynchronizeShellChecks();
+            ShowFailure("주기 변경 실패", exception);
+        }
+    }
+
+    private async Task SelectSymbolAsync(string symbol)
+    {
+        if (string.IsNullOrWhiteSpace(symbol)) return;
+        _selectedSymbol = symbol.Trim();
+        _selectedMetadata = null;
+        _lastVersion = -1;
+        _cursor.Clear();
+        if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+        {
+            _viewport.Reset(snapshot.Candles.Length);
+            _viewport.SetVisibleBars(
+                _workspace.RequestedVisibleBars,
+                snapshot.Candles.Length,
+                followLatest: true);
+        }
+        await RefreshSelectedMetadataAsync();
+        _chart.Focus();
+        _chart.Invalidate();
+    }
+
+    private async Task RefreshSelectedMetadataAsync()
+    {
+        string symbol = _selectedSymbol;
+        if (_metadataCache.TryGetValue(symbol, out InstrumentMetadata? cached))
+        {
+            _selectedMetadata = cached;
+            return;
+        }
+
+        InstrumentMetadata metadata;
+        if (_source is IInstrumentMetadataSource metadataSource)
+        {
+            try
+            {
+                metadata = await metadataSource.GetInstrumentMetadataAsync(
+                    symbol,
+                    _stop.Token);
+            }
+            catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                metadata = CreateFallbackMetadata(symbol);
+            }
+        }
+        else
+        {
+            metadata = CreateFallbackMetadata(symbol);
+        }
+
+        _metadataCache[symbol] = metadata;
+        if (string.Equals(_selectedSymbol, symbol, StringComparison.Ordinal))
+            _selectedMetadata = metadata;
+    }
+
+    private InstrumentMetadata CreateFallbackMetadata(string symbol) =>
+        new(symbol, symbol, "-", _source.Name, DateTimeOffset.UtcNow);
+
     private void OnFrame(object? sender, EventArgs e)
     {
         SymbolSnapshot? snapshot = null;
-        if (TryGetSelectedSnapshot(out snapshot) &&
-            snapshot.Version != _lastVersion)
+        bool changed = TryGetSelectedSnapshot(out snapshot) &&
+                       snapshot.Version != _lastVersion;
+        if (changed && snapshot is not null)
         {
             _lastVersion = snapshot.Version;
-            if (_cursor.Current.IsVisible)
+            if (_workspace.ShowCrosshair && _cursor.Current.IsVisible)
                 UpdateCursor((int)_cursor.Current.X, (int)_cursor.Current.Y, snapshot);
             _chart.Invalidate();
         }
 
+        long now = Environment.TickCount64;
+        if (!changed && now - _lastShellUpdateMilliseconds < 250) return;
+        _lastShellUpdateMilliseconds = now;
         EngineMetrics metrics = _engine.GetMetrics();
         ChartWindow window = snapshot is null
             ? ChartWindow.Empty
             : _viewport.Resolve(snapshot.Candles.Length);
-        _status.Text =
-            $"{_source.Name} | {_options.Timeframe} | " +
-            $"bars {window.Count:N0} gap {window.RightBlankBars:N0} " +
-            $"offset {_viewport.RightOffsetBars:N0} | " +
-            $"events {metrics.ProcessedEvents:N0} | " +
-            $"queue max {metrics.MaxQueueDepth:N0} | " +
-            $"latency {metrics.LastLatencyMicroseconds:N0}us";
+        UpdateShell(snapshot, window, metrics);
     }
 
     private void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
@@ -232,17 +348,24 @@ internal sealed class MainForm : Form
             e.Surface.Canvas,
             snapshot,
             _chartFrame,
-            _renderOptions);
+            _workspace.RenderOptions);
 
-        int legendCandleIndex = _cursor.Current.IsVisible
-            ? _cursor.Current.CandleIndex
-            : snapshot.Candles.Length - 1;
-        _legendBuilder.Build(snapshot, legendCandleIndex, _legendFrame);
-        _legendRenderer.Render(e.Surface.Canvas, _chartFrame, _legendFrame);
-        _crosshairRenderer.Render(
-            e.Surface.Canvas,
-            _chartFrame,
-            _cursor.Current);
+        if (_workspace.ShowLegend)
+        {
+            int legendCandleIndex =
+                _workspace.ShowCrosshair && _cursor.Current.IsVisible
+                    ? _cursor.Current.CandleIndex
+                    : snapshot.Candles.Length - 1;
+            _legendBuilder.Build(snapshot, legendCandleIndex, _legendFrame);
+            _legendRenderer.Render(e.Surface.Canvas, _chartFrame, _legendFrame);
+        }
+        if (_workspace.ShowCrosshair)
+        {
+            _crosshairRenderer.Render(
+                e.Surface.Canvas,
+                _chartFrame,
+                _cursor.Current);
+        }
     }
 
     private void OnChartMouseWheel(object? sender, MouseEventArgs e)
@@ -253,7 +376,7 @@ internal sealed class MainForm : Form
             0f,
             1f);
         _viewport.Zoom(e.Delta, snapshot.Candles.Length, anchor);
-        UpdateCursor(e.X, e.Y, snapshot);
+        if (_workspace.ShowCrosshair) UpdateCursor(e.X, e.Y, snapshot);
         _chart.Invalidate();
     }
 
@@ -268,7 +391,7 @@ internal sealed class MainForm : Form
         _chart.Focus();
         if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
         {
-            UpdateCursor(e.X, e.Y, snapshot);
+            if (_workspace.ShowCrosshair) UpdateCursor(e.X, e.Y, snapshot);
             _draggingPricePanel = e.Y >= _chartFrame.MainPanel.Top &&
                                   e.Y <= _chartFrame.MainPanel.Bottom;
         }
@@ -307,7 +430,7 @@ internal sealed class MainForm : Form
             }
         }
 
-        UpdateCursor(e.X, e.Y, snapshot);
+        if (_workspace.ShowCrosshair) UpdateCursor(e.X, e.Y, snapshot);
         _chart.Invalidate();
     }
 
@@ -329,10 +452,10 @@ internal sealed class MainForm : Form
 
     private void OnChartMouseDoubleClick(object? sender, MouseEventArgs e)
     {
-        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
-        _viewport.FollowLatest(snapshot.Candles.Length);
-        UpdateCursor(e.X, e.Y, snapshot);
-        _chart.Invalidate();
+        FollowLatest();
+        if (_workspace.ShowCrosshair &&
+            TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+            UpdateCursor(e.X, e.Y, snapshot);
     }
 
     private bool HandleNavigationKey(Keys keyCode)
@@ -366,12 +489,85 @@ internal sealed class MainForm : Form
                 break;
             case Keys.Escape:
                 _viewport.Reset(snapshot.Candles.Length);
+                _viewport.SetVisibleBars(
+                    _workspace.RequestedVisibleBars,
+                    snapshot.Candles.Length,
+                    followLatest: true);
                 break;
         }
 
         _cursor.Clear();
         _chart.Invalidate();
         return true;
+    }
+
+    private void ApplyVisibleBars(int bars)
+    {
+        _workspace.SetVisibleBars(bars);
+        if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+            _viewport.SetVisibleBars(bars, snapshot.Candles.Length);
+        SynchronizeShellChecks();
+        _cursor.Clear();
+        _chart.Focus();
+        _chart.Invalidate();
+    }
+
+    private void FollowLatest()
+    {
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        _viewport.FollowLatest(snapshot.Candles.Length);
+        _cursor.Clear();
+        _chart.Focus();
+        _chart.Invalidate();
+    }
+
+    private void ResetView()
+    {
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        _viewport.Reset(snapshot.Candles.Length);
+        _viewport.SetVisibleBars(
+            _workspace.RequestedVisibleBars,
+            snapshot.Candles.Length,
+            followLatest: true);
+        _cursor.Clear();
+        _chart.Focus();
+        _chart.Invalidate();
+    }
+
+    private void SetDatesVisible(bool value)
+    {
+        _workspace.SetDates(value);
+        SynchronizeShellChecks();
+        _chart.Invalidate();
+    }
+
+    private void SetAxesVisible(bool value)
+    {
+        _workspace.SetAxes(value);
+        SynchronizeShellChecks();
+        _chart.Invalidate();
+    }
+
+    private void SetLegendVisible(bool value)
+    {
+        _workspace.SetLegend(value);
+        SynchronizeShellChecks();
+        _chart.Invalidate();
+    }
+
+    private void SetCrosshairVisible(bool value)
+    {
+        _workspace.SetCrosshair(value);
+        if (!value) _cursor.Clear();
+        SynchronizeShellChecks();
+        _chart.Invalidate();
+    }
+
+    private void SetInfoPanelVisible(bool value)
+    {
+        _workspace.SetInfoPanel(value);
+        SynchronizeShellChecks();
+        _chart.Invalidate();
     }
 
     private void UpdateCursor(int x, int y, SymbolSnapshot snapshot)
@@ -411,19 +607,33 @@ internal sealed class MainForm : Form
         [NotNullWhen(true)] out SymbolSnapshot? snapshot) =>
         _engine.TryGetSnapshot(_selectedSymbol, out snapshot) && snapshot is not null;
 
+    private void ShowFailure(string title, Exception exception)
+    {
+        _statusLabel.Text = title + ": " + exception.Message;
+        MessageBox.Show(
+            this,
+            exception.ToString(),
+            title,
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+    }
+
     private void OnFormClosed(object? sender, FormClosedEventArgs e)
     {
         if (Interlocked.Exchange(ref _closing, 1) != 0) return;
         _frameTimer.Stop();
         _stop.Cancel();
+        _streamStop?.Cancel();
         try { _streamTask?.GetAwaiter().GetResult(); }
         catch (OperationCanceledException) { }
+        _streamStop?.Dispose();
         _source.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _engine.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _crosshairRenderer.Dispose();
         _legendRenderer.Dispose();
         _renderer.Dispose();
         _frameTimer.Dispose();
+        _reloadGate.Dispose();
         _stop.Dispose();
     }
 }
