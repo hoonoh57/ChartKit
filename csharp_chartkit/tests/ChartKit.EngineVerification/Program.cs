@@ -11,6 +11,7 @@ try
     ChartCursorVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
+    MarketDataNormalizerVerification.Run();
     TickDataVerification.Run();
     await ReplayDataVerification.RunAsync();
     await KiwoomSessionVerification.RunAsync();
