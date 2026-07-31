@@ -10,6 +10,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _dateBoundaryPaint;
+    private readonly SKPaint _upWickPaint;
+    private readonly SKPaint _downWickPaint;
     private readonly SKPaint _upFillPaint;
     private readonly SKPaint _downFillPaint;
     private readonly SKPaint _upVolumePaint;
@@ -18,7 +20,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
     private readonly SKPaint[] _seriesPaints;
     private readonly SKPath _gridPath = new();
     private readonly SKPath _dateBoundaryPath = new();
-    private readonly SKPath _wickPath = new();
+    private readonly SKPath _upWickPath = new();
+    private readonly SKPath _downWickPath = new();
     private readonly SKPath _upBodyPath = new();
     private readonly SKPath _downBodyPath = new();
     private readonly SKPath _upVolumePath = new();
@@ -32,6 +35,10 @@ public sealed partial class SkiaChartRenderer : IDisposable
         _backgroundPaint = Fill(new SKColor(11, 15, 20));
         _gridPaint = Stroke(new SKColor(36, 46, 58), 1f);
         _dateBoundaryPaint = Stroke(new SKColor(70, 83, 98), 1.2f);
+        _upWickPaint = Stroke(new SKColor(255, 105, 100), 1.35f);
+        _downWickPaint = Stroke(new SKColor(92, 158, 255), 1.35f);
+        _upWickPaint.IsAntialias = false;
+        _downWickPaint.IsAntialias = false;
         _upFillPaint = Fill(new SKColor(239, 83, 80));
         _downFillPaint = Fill(new SKColor(66, 133, 244));
         _upVolumePaint = Fill(new SKColor(239, 83, 80, 150));
@@ -40,16 +47,9 @@ public sealed partial class SkiaChartRenderer : IDisposable
         _textPaint.TextSize = 13f;
         _textPaint.IsAntialias = true;
 
-        SKColor[] colors =
-        [
-            new(255, 193, 7), new(0, 188, 212), new(156, 39, 176),
-            new(76, 175, 80), new(255, 152, 0), new(233, 30, 99),
-            new(3, 169, 244), new(205, 220, 57), new(121, 85, 72),
-            new(0, 150, 136), new(255, 235, 59), new(103, 58, 183)
-        ];
-        _seriesPaints = new SKPaint[colors.Length];
-        for (int index = 0; index < colors.Length; index++)
-            _seriesPaints[index] = Stroke(colors[index], 1.4f);
+        _seriesPaints = new SKPaint[ChartSeriesPalette.Count];
+        for (int index = 0; index < _seriesPaints.Length; index++)
+            _seriesPaints[index] = Stroke(ChartSeriesPalette.GetColor(index), 1.4f);
     }
 
     public void Render(
@@ -126,7 +126,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
         SymbolSnapshot snapshot,
         ChartFrame frame)
     {
-        _wickPath.Rewind();
+        _upWickPath.Rewind();
+        _downWickPath.Rewind();
         _upBodyPath.Rewind();
         _downBodyPath.Rewind();
         _upVolumePath.Rewind();
@@ -140,11 +141,12 @@ public sealed partial class SkiaChartRenderer : IDisposable
                 frame.Window.StartIndex + visibleIndex];
             float x = frame.X(visibleIndex);
             bool rising = candle.Close >= candle.Open;
+            SKPath wickPath = rising ? _upWickPath : _downWickPath;
             SKPath bodyPath = rising ? _upBodyPath : _downBodyPath;
             SKPath volumePath = rising ? _upVolumePath : _downVolumePath;
 
-            _wickPath.MoveTo(x, frame.PriceY(candle.High));
-            _wickPath.LineTo(x, frame.PriceY(candle.Low));
+            wickPath.MoveTo(x, frame.PriceY(candle.High));
+            wickPath.LineTo(x, frame.PriceY(candle.Low));
 
             float openY = frame.PriceY(candle.Open);
             float closeY = frame.PriceY(candle.Close);
@@ -167,7 +169,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
                 frame.VolumePanel.Bottom));
         }
 
-        canvas.DrawPath(_wickPath, _gridPaint);
+        canvas.DrawPath(_upWickPath, _upWickPaint);
+        canvas.DrawPath(_downWickPath, _downWickPaint);
         canvas.DrawPath(_upBodyPath, _upFillPaint);
         canvas.DrawPath(_downBodyPath, _downFillPaint);
         canvas.DrawPath(_upVolumePath, _upVolumePaint);
@@ -265,6 +268,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
         _backgroundPaint.Dispose();
         _gridPaint.Dispose();
         _dateBoundaryPaint.Dispose();
+        _upWickPaint.Dispose();
+        _downWickPaint.Dispose();
         _upFillPaint.Dispose();
         _downFillPaint.Dispose();
         _upVolumePaint.Dispose();
@@ -273,7 +278,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
         foreach (SKPaint paint in _seriesPaints) paint.Dispose();
         _gridPath.Dispose();
         _dateBoundaryPath.Dispose();
-        _wickPath.Dispose();
+        _upWickPath.Dispose();
+        _downWickPath.Dispose();
         _upBodyPath.Dispose();
         _downBodyPath.Dispose();
         _upVolumePath.Dispose();
