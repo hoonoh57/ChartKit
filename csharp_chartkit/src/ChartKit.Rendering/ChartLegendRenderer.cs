@@ -18,6 +18,8 @@ public sealed class ChartLegendRenderer : IDisposable
         new int[ChartLegendFrame.MaximumEntryCount];
     private readonly bool[] _cachedHasValue =
         new bool[ChartLegendFrame.MaximumEntryCount];
+    private readonly bool[] _cachedIndicatorStart =
+        new bool[ChartLegendFrame.MaximumEntryCount];
     private readonly float[] _nextX = new float[ChartFrame.MaximumPanelIndex + 1];
     private readonly int[] _rows = new int[ChartFrame.MaximumPanelIndex + 1];
     private int _cachedCount;
@@ -96,13 +98,16 @@ public sealed class ChartLegendRenderer : IDisposable
                 ReferenceEquals(_cachedNames[index], entry.IndicatorName) &&
                 ReferenceEquals(_cachedKeys[index], entry.ValueKey) &&
                 _cachedValueBits[index] == valueBits &&
-                _cachedHasValue[index] == entry.HasValue)
+                _cachedHasValue[index] == entry.HasValue &&
+                _cachedIndicatorStart[index] == entry.IsIndicatorStart)
                 continue;
 
             string value = entry.HasValue
                 ? FormatNumber(entry.Value)
                 : "--";
-            string label = $"{entry.IndicatorName} {entry.ValueKey} {value}";
+            string label = entry.IsIndicatorStart
+                ? $"{entry.IndicatorName} {entry.ValueKey} {value}"
+                : $"{entry.ValueKey} {value}";
             _blobs[index]?.Dispose();
             _blobs[index] = SKTextBlob.Create(label, _font) ??
                             throw new InvalidOperationException("Legend label shaping failed.");
@@ -110,6 +115,7 @@ public sealed class ChartLegendRenderer : IDisposable
             _cachedKeys[index] = entry.ValueKey;
             _cachedValueBits[index] = valueBits;
             _cachedHasValue[index] = entry.HasValue;
+            _cachedIndicatorStart[index] = entry.IsIndicatorStart;
         }
 
         for (int index = legend.EntryCount; index < _cachedCount; index++)
@@ -120,6 +126,7 @@ public sealed class ChartLegendRenderer : IDisposable
             _cachedKeys[index] = null;
             _cachedValueBits[index] = 0;
             _cachedHasValue[index] = false;
+            _cachedIndicatorStart[index] = false;
         }
         _cachedCount = legend.EntryCount;
     }
