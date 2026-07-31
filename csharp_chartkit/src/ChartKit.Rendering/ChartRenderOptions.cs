@@ -1,7 +1,6 @@
 namespace ChartKit.CSharp.Rendering;
 
 public sealed record ChartRenderOptions(
-    int VisibleBars = 160,
     float MainPanelRatio = 0.56f,
     float VolumePanelRatio = 0.10f,
     float LeftPadding = 10f,
@@ -14,7 +13,6 @@ public sealed record ChartRenderOptions(
 
     public void Validate()
     {
-        if (VisibleBars <= 0) throw new ArgumentOutOfRangeException(nameof(VisibleBars));
         if (MainPanelRatio <= 0f || MainPanelRatio >= 1f)
             throw new ArgumentOutOfRangeException(nameof(MainPanelRatio));
         if (VolumePanelRatio < 0f || MainPanelRatio + VolumePanelRatio >= 1f)
