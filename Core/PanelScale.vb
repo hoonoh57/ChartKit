@@ -68,8 +68,12 @@ Namespace Core
                         Dim result As IndicatorResult = results(resultIndex)
                         If result Is Nothing OrElse result.Values Is Nothing Then Continue For
 
-                        For Each pair As KeyValuePair(Of String, Single) In result.Values
-                            If Single.IsNaN(pair.Value) Then Continue For
+                        Dim valueEnumerator As Dictionary(Of String, Single).Enumerator =
+                            result.Values.GetEnumerator()
+                        While valueEnumerator.MoveNext()
+                            Dim pair As KeyValuePair(Of String, Single) =
+                                valueEnumerator.Current
+                            If Single.IsNaN(pair.Value) Then Continue While
 
                             Select Case result.KindOf(pair.Key)
                                 Case SeriesKind.Line
@@ -79,14 +83,17 @@ Namespace Core
                                 Case SeriesKind.Baseline
                                     scale.Baselines(CanonicalBaselineKey(pair.Key)) = pair.Value
                             End Select
-                        Next
+                        End While
                     Next
                 Next
 
-                For Each level As Single In scale.Baselines.Values
+                Dim baselineEnumerator As Dictionary(Of String, Single).ValueCollection.Enumerator =
+                    scale.Baselines.Values.GetEnumerator()
+                While baselineEnumerator.MoveNext()
+                    Dim level As Single = baselineEnumerator.Current
                     scale.Minimum = Math.Min(scale.Minimum, level)
                     scale.Maximum = Math.Max(scale.Maximum, level)
-                Next
+                End While
 
                 If scale.Minimum = Single.MaxValue OrElse
                    scale.Maximum = Single.MinValue Then
@@ -111,10 +118,23 @@ Namespace Core
                                                panelIndexes As List(Of Integer))
             For indicatorIndex As Integer = 0 To indicators.Count - 1
                 Dim panelIndex As Integer = indicators(indicatorIndex).PanelIndex
-                If panelIndex <= 0 OrElse panelIndexes.Contains(panelIndex) Then Continue For
-                panelIndexes.Add(panelIndex)
+                If panelIndex <= 0 Then Continue For
+                InsertPanelIndex(panelIndexes, panelIndex)
             Next
-            panelIndexes.Sort()
+        End Sub
+
+        Private Shared Sub InsertPanelIndex(panelIndexes As List(Of Integer),
+                                            panelIndex As Integer)
+            Dim insertAt As Integer = 0
+            While insertAt < panelIndexes.Count AndAlso
+                  panelIndexes(insertAt) < panelIndex
+                insertAt += 1
+            End While
+
+            If insertAt < panelIndexes.Count AndAlso
+               panelIndexes(insertAt) = panelIndex Then Return
+
+            panelIndexes.Insert(insertAt, panelIndex)
         End Sub
 
         Private Shared Function CanonicalBaselineKey(key As String) As String
