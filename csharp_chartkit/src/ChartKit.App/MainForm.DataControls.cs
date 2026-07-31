@@ -9,10 +9,11 @@ internal sealed partial class MainForm
     private const int MinimumHistoryCount = 20;
     private const int MaximumHistoryCount = 5_000;
 
-    private readonly ToolStripComboBox _dataSymbolEditor = new();
-    private readonly ToolStripComboBox _dataTimeframeEditor = new();
+    private readonly ToolStripTextBox _dataSymbolEditor = new();
+    private readonly ToolStripDropDownButton _symbolHistoryButton = new("▼");
+    private readonly ToolStripDropDownButton _dataTimeframeEditor = new();
     private readonly ToolStripTextBox _historyCountEditor = new();
-    private readonly ToolStripComboBox _displayCountEditor = new();
+    private readonly ToolStripTextBox _displayCountEditor = new();
     private readonly ToolStripButton _reloadDataButton = new("조회");
     private readonly List<string> _activeSymbols = new();
     private bool _dataControlsInitialized;
@@ -20,15 +21,20 @@ internal sealed partial class MainForm
     private int _requestedHistoryCount;
     private int _lastSynchronizedVisibleBars = -1;
 
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        InitializeDataControls();
-    }
+    private bool IsDataEditorFocused =>
+        _dataSymbolEditor.TextBox.Focused ||
+        _historyCountEditor.TextBox.Focused ||
+        _displayCountEditor.TextBox.Focused ||
+        _dataTimeframeEditor.DropDown.Visible ||
+        _symbolHistoryButton.DropDown.Visible;
 
     private void InitializeDataControls()
     {
         if (_dataControlsInitialized) return;
+        if (IsHandleCreated)
+            throw new InvalidOperationException(
+                "Data toolbar must be initialized before the form handle is created.");
+
         _dataControlsInitialized = true;
         _requestedHistoryCount = Math.Clamp(
             _options.HistoryCount,
@@ -49,12 +55,11 @@ internal sealed partial class MainForm
 
     private void ConfigureSymbolEditor()
     {
-        _dataSymbolEditor.DropDownStyle = ComboBoxStyle.DropDown;
         _dataSymbolEditor.AutoSize = false;
         _dataSymbolEditor.Width = 118;
-        _dataSymbolEditor.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
-        _dataSymbolEditor.AutoCompleteSource = AutoCompleteSource.ListItems;
-        _dataSymbolEditor.Items.AddRange(_activeSymbols.Cast<object>().ToArray());
+        _dataSymbolEditor.TextBox.CharacterCasing = CharacterCasing.Upper;
+        _dataSymbolEditor.TextBox.TextAlign = HorizontalAlignment.Left;
+        _dataSymbolEditor.ToolTipText = "종목코드를 입력하고 Enter 또는 조회를 누르십시오.";
         _dataSymbolEditor.KeyDown += async (_, e) =>
         {
             if (e.KeyCode != Keys.Enter) return;
@@ -62,31 +67,36 @@ internal sealed partial class MainForm
             await ExecuteDataCommandAsync(
                 () => CommitSymbolAsync(_dataSymbolEditor.Text));
         };
-        _dataSymbolEditor.SelectedIndexChanged += async (_, _) =>
-        {
-            if (_updatingDataControls ||
-                _dataSymbolEditor.SelectedItem is not string symbol)
-                return;
-            await ExecuteDataCommandAsync(() => CommitSymbolAsync(symbol));
-        };
+
+        _symbolHistoryButton.AutoSize = false;
+        _symbolHistoryButton.Width = 24;
+        _symbolHistoryButton.ToolTipText = "조회한 종목 선택";
+        RefreshSymbolHistoryMenu();
     }
 
     private void ConfigureTimeframeEditor()
     {
-        _dataTimeframeEditor.DropDownStyle = ComboBoxStyle.DropDownList;
         _dataTimeframeEditor.AutoSize = false;
         _dataTimeframeEditor.Width = 72;
-        _dataTimeframeEditor.Items.AddRange(
-            TimeframeChoices.Cast<object>().ToArray());
-        _dataTimeframeEditor.SelectedIndexChanged += async (_, _) =>
+        _dataTimeframeEditor.ToolTipText = "차트 주기 선택";
+        _dataTimeframeEditor.DropDownItems.Clear();
+        foreach (TimeframeChoice choice in TimeframeChoices)
         {
-            if (_updatingDataControls ||
-                _dataTimeframeEditor.SelectedItem is not TimeframeChoice choice ||
-                choice.Value == _workspace.Timeframe)
-                return;
-            await ExecuteDataCommandAsync(
-                () => ReloadActiveSymbolsAsync(choice.Value, reloadAll: true));
-        };
+            TimeframeChoice captured = choice;
+            _dataTimeframeEditor.DropDownItems.Add(
+                choice.Text,
+                null,
+                async (_, _) =>
+                {
+                    if (_updatingDataControls ||
+                        captured.Value == _workspace.Timeframe)
+                        return;
+                    await ExecuteDataCommandAsync(
+                        () => ReloadActiveSymbolsAsync(
+                            captured.Value,
+                            reloadAll: true));
+                });
+        }
     }
 
     private void ConfigureHistoryCountEditor()
@@ -106,11 +116,9 @@ internal sealed partial class MainForm
 
     private void ConfigureDisplayCountEditor()
     {
-        _displayCountEditor.DropDownStyle = ComboBoxStyle.DropDown;
         _displayCountEditor.AutoSize = false;
         _displayCountEditor.Width = 72;
-        _displayCountEditor.Items.AddRange(
-            VisibleBarChoices.Select(value => (object)value).ToArray());
+        _displayCountEditor.TextBox.TextAlign = HorizontalAlignment.Right;
         _displayCountEditor.ToolTipText =
             "화면 표시 봉수. 마우스 휠 줌과 자동 동기화됩니다.";
         _displayCountEditor.KeyDown += (_, e) =>
@@ -119,38 +127,40 @@ internal sealed partial class MainForm
             e.SuppressKeyPress = true;
             ApplyDisplayCountFromEditor();
         };
-        _displayCountEditor.SelectedIndexChanged += (_, _) =>
-        {
-            if (_updatingDataControls ||
-                _displayCountEditor.SelectedItem is not int bars)
-                return;
-            ApplyVisibleBars(bars);
-            SynchronizeViewportDisplayCount(force: true);
-        };
     }
 
     private void RebuildDataToolbar()
     {
-        _toolbar.Items.Clear();
-        _toolbar.Items.AddRange(
-        [
-            new ToolStripLabel("종목"),
-            _dataSymbolEditor,
-            _symbolNameLabel,
-            new ToolStripSeparator(),
-            new ToolStripLabel("주기"),
-            _dataTimeframeEditor,
-            new ToolStripLabel("총"),
-            _historyCountEditor,
-            _reloadDataButton,
-            new ToolStripLabel("표시"),
-            _displayCountEditor,
-            _countLabel,
-            new ToolStripSeparator(),
-            _dateButton,
-            _infoButton,
-            _toolsButton
-        ]);
+        _toolbar.SuspendLayout();
+        try
+        {
+            _toolbar.Items.Clear();
+            _toolbar.Items.AddRange(
+            [
+                new ToolStripLabel("종목"),
+                _dataSymbolEditor,
+                _symbolHistoryButton,
+                _symbolNameLabel,
+                new ToolStripSeparator(),
+                new ToolStripLabel("주기"),
+                _dataTimeframeEditor,
+                new ToolStripLabel("총"),
+                _historyCountEditor,
+                _reloadDataButton,
+                new ToolStripLabel("표시"),
+                _displayCountEditor,
+                _countLabel,
+                new ToolStripSeparator(),
+                _dateButton,
+                _infoButton,
+                _toolsButton
+            ]);
+        }
+        finally
+        {
+            _toolbar.ResumeLayout(performLayout: false);
+        }
+
         _reloadDataButton.ToolTipText = "종목·주기·총 봉수를 적용해 다시 조회";
         _reloadDataButton.Click += async (_, _) =>
             await ExecuteDataCommandAsync(ApplyEditorsAndReloadAsync);
@@ -445,7 +455,6 @@ internal sealed partial class MainForm
         _updatingDataControls = true;
         try
         {
-            _displayCountEditor.SelectedIndex = -1;
             _displayCountEditor.Text =
                 visibleBars.ToString(CultureInfo.InvariantCulture);
         }
@@ -457,13 +466,17 @@ internal sealed partial class MainForm
 
     private void SelectDataTimeframe(CandleTimeframe timeframe)
     {
-        for (int index = 0; index < _dataTimeframeEditor.Items.Count; index++)
+        TimeframeChoice? selected = TimeframeChoices.FirstOrDefault(
+            choice => choice.Value == timeframe);
+        _dataTimeframeEditor.Text = selected?.Text ?? timeframe.ToString();
+
+        foreach (ToolStripItem item in _dataTimeframeEditor.DropDownItems)
         {
-            if (_dataTimeframeEditor.Items[index] is TimeframeChoice choice &&
-                choice.Value == timeframe)
+            if (item is ToolStripMenuItem menuItem)
             {
-                _dataTimeframeEditor.SelectedIndex = index;
-                return;
+                menuItem.Checked =
+                    selected is not null &&
+                    string.Equals(menuItem.Text, selected.Text, StringComparison.Ordinal);
             }
         }
     }
@@ -472,9 +485,23 @@ internal sealed partial class MainForm
     {
         if (_activeSymbols.Contains(symbol, StringComparer.Ordinal)) return false;
         _activeSymbols.Add(symbol);
-        if (_dataControlsInitialized)
-            _dataSymbolEditor.Items.Add(symbol);
+        if (_dataControlsInitialized) RefreshSymbolHistoryMenu();
         return true;
+    }
+
+    private void RefreshSymbolHistoryMenu()
+    {
+        _symbolHistoryButton.DropDownItems.Clear();
+        foreach (string symbol in _activeSymbols)
+        {
+            string captured = symbol;
+            _symbolHistoryButton.DropDownItems.Add(
+                symbol,
+                null,
+                async (_, _) => await ExecuteDataCommandAsync(
+                    () => CommitSymbolAsync(captured)));
+        }
+        _symbolHistoryButton.Enabled = _activeSymbols.Count > 0;
     }
 
     private static string NormalizeSymbol(string? value)
