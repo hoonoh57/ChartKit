@@ -1,0 +1,26 @@
+name: ChartKit CSharp Legacy Inventory
+
+on:
+  push:
+    branches:
+      - csharp/standalone-engine
+    paths:
+      - 'csharp_chartkit/migration/LegacyInventory/**'
+      - '.github/workflows/chartkit-csharp-inventory.yml'
+  workflow_dispatch:
+
+jobs:
+  inventory:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore .\csharp_chartkit\migration\LegacyInventory\LegacyInventory.csproj
+      - name: Build
+        run: dotnet build .\csharp_chartkit\migration\LegacyInventory\LegacyInventory.csproj -c Release --no-restore
+      - name: Inventory
+        run: dotnet run --project .\csharp_chartkit\migration\LegacyInventory\LegacyInventory.csproj -c Release --no-build
