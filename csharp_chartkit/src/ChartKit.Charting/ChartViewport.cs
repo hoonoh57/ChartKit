@@ -135,28 +135,45 @@ public sealed class ChartViewport
         ChartWindow previous = Resolve(totalBars);
         int notches = Math.Max(1, Math.Abs(wheelDelta) / 120);
         double factor = wheelDelta > 0 ? 0.84d : 1.19d;
-        double target = _visibleBars;
-        for (int index = 0; index < notches; index++) target *= factor;
+        double targetSlots = Math.Max(1, previous.VisibleSlotCount);
+        for (int index = 0; index < notches; index++) targetSlots *= factor;
 
         int nextVisible = Math.Clamp(
-            (int)Math.Round(target, MidpointRounding.AwayFromZero),
+            (int)Math.Round(
+                targetSlots - _defaultRightBlankBars,
+                MidpointRounding.AwayFromZero),
             _minimumVisibleBars,
             _maximumVisibleBars);
         nextVisible = Math.Min(nextVisible, totalBars);
+        int nextTotalSlots = Math.Max(1, nextVisible + _defaultRightBlankBars);
 
-        double anchorIndex = previous.IsEmpty
-            ? totalBars - 1d
-            : previous.StartIndex + (previous.Count - 1d) * anchorFraction;
+        double previousAnchorSlot =
+            anchorFraction * Math.Max(0, previous.VisibleSlotCount - 1d);
+        double previousVisibleIndex = Math.Min(
+            Math.Max(0d, previousAnchorSlot),
+            Math.Max(0d, previous.Count - 1d));
+        double anchorIndex = previous.StartIndex + previousVisibleIndex;
+        double nextAnchorSlot =
+            anchorFraction * Math.Max(0, nextTotalSlots - 1d);
         int nextStart = (int)Math.Round(
-            anchorIndex - (nextVisible - 1d) * anchorFraction,
+            anchorIndex - nextAnchorSlot,
             MidpointRounding.AwayFromZero);
-        nextStart = Math.Clamp(nextStart, 0, Math.Max(0, totalBars - nextVisible));
+        nextStart = Math.Clamp(nextStart, 0, Math.Max(0, totalBars - 1));
 
         _visibleBars = nextVisible;
-        int nextOffset = Math.Max(0, totalBars - (nextStart + nextVisible));
-        _horizontalShiftBars = nextOffset == 0
-            ? 0
-            : _defaultRightBlankBars + nextOffset;
+        int nextEndBySlots = nextStart + nextTotalSlots;
+        if (nextEndBySlots > totalBars)
+        {
+            int desiredBlank = Math.Min(
+                _maximumRightBlankBars,
+                nextEndBySlots - totalBars);
+            _horizontalShiftBars = _defaultRightBlankBars - desiredBlank;
+        }
+        else
+        {
+            int desiredOffset = totalBars - nextEndBySlots;
+            _horizontalShiftBars = _defaultRightBlankBars + desiredOffset;
+        }
         return Resolve(totalBars);
     }
 
