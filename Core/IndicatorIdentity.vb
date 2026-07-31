@@ -36,7 +36,7 @@ Namespace Core
             builder.Append(DefinitionId(indicator))
             builder.Append("[")
 
-            Dim parameters = indicator.Parameters
+            Dim parameters As Dictionary(Of String, Object) = indicator.Parameters
             If parameters IsNot Nothing AndAlso parameters.Count > 0 Then
                 Dim keys As New List(Of String)(parameters.Keys)
                 keys.Sort(StringComparer.Ordinal)
@@ -69,10 +69,15 @@ Namespace Core
         Public Shared Function SourceTypeName(indicator As IIndicator) As String
             If indicator Is Nothing Then Return ""
 
-            Dim registration = TryCast(indicator, RegisteredIndicator)
-            Dim source As IIndicator = If(registration Is Nothing,
-                                          indicator,
-                                          registration.SourceIndicator)
+            Dim registration As RegisteredIndicator =
+                TryCast(indicator, RegisteredIndicator)
+            Dim source As IIndicator
+            If registration Is Nothing Then
+                source = indicator
+            Else
+                source = registration.SourceIndicator
+            End If
+
             Return source.GetType().AssemblyQualifiedName
         End Function
 
@@ -80,19 +85,25 @@ Namespace Core
             If value Is Nothing Then Return "null"
 
             If TypeOf value Is Boolean Then
-                Return If(DirectCast(value, Boolean), "true", "false")
+                Return If(CBool(value), "true", "false")
             End If
 
             If TypeOf value Is DateTime Then
-                Return DirectCast(value, DateTime).ToString("O", CultureInfo.InvariantCulture)
+                Return CType(value, DateTime).ToString(
+                    "O",
+                    CultureInfo.InvariantCulture)
             End If
 
-            Dim formattable = TryCast(value, IFormattable)
+            Dim formattable As IFormattable = TryCast(value, IFormattable)
             If formattable IsNot Nothing Then
-                Return EscapeComponent(formattable.ToString(Nothing, CultureInfo.InvariantCulture))
+                Return EscapeComponent(
+                    formattable.ToString(
+                        Nothing,
+                        CultureInfo.InvariantCulture))
             End If
 
-            Return EscapeComponent(Convert.ToString(value, CultureInfo.InvariantCulture))
+            Return EscapeComponent(
+                Convert.ToString(value, CultureInfo.InvariantCulture))
         End Function
 
         Private Shared Function EscapeComponent(value As String) As String
