@@ -64,7 +64,8 @@ public sealed class CandleRingBuffer : IReadOnlyList<Candle>
 
     public void CopyTo(Span<Candle> destination)
     {
-        if (destination.Length < _count) throw new ArgumentException("Destination is too small.", nameof(destination));
+        if (destination.Length < _count)
+            throw new ArgumentException("Destination is too small.", nameof(destination));
         for (int index = 0; index < _count; index++) destination[index] = this[index];
     }
 
@@ -133,6 +134,13 @@ public sealed class IndicatorPointRingBuffer : IReadOnlyList<IndicatorPoint>
         var result = new IndicatorPoint[_count];
         for (int index = 0; index < _count; index++) result[index] = this[index];
         return result;
+    }
+
+    public void Clear()
+    {
+        Array.Clear(_items);
+        _head = 0;
+        _count = 0;
     }
 
     public IEnumerator<IndicatorPoint> GetEnumerator()
