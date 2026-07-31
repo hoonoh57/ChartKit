@@ -75,11 +75,10 @@ public sealed class ChartCrosshairRenderer : IDisposable
             "yyyy-MM-dd HH:mm:ss",
             CultureInfo.InvariantCulture);
         Candle candle = cursor.Candle;
-        _ohlcvLabel = string.Create(
-            CultureInfo.InvariantCulture,
+        _ohlcvLabel =
             $"O {FormatNumber(candle.Open)}  H {FormatNumber(candle.High)}  " +
             $"L {FormatNumber(candle.Low)}  C {FormatNumber(candle.Close)}  " +
-            $"V {candle.Volume:N0}");
+            $"V {candle.Volume.ToString("N0", CultureInfo.InvariantCulture)}";
     }
 
     private void DrawPriceLabel(SKCanvas canvas, ChartFrame frame, float y)
