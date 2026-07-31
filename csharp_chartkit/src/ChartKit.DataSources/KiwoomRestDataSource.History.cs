@@ -45,6 +45,8 @@ public sealed partial class KiwoomRestDataSource
                     path, apiId, body, count, cancellationToken).ConfigureAwait(false);
                 List<Candle> result = NormalizeAndTail(
                     ParseRows(page.Rows, request.Timeframe, daily: true),
+                    request.Timeframe,
+                    SourceArrayDirection.ReverseWhole,
                     count);
                 SaveHistorySeed(symbol, result, 0);
                 return result;
@@ -65,16 +67,18 @@ public sealed partial class KiwoomRestDataSource
                 PagedRows page = await FetchPagedAsync(
                     path, "ka10079", body, requiredBaseRows, cancellationToken)
                     .ConfigureAwait(false);
+                CandleTimeframe baseTimeframe = CandleTimeframe.Tick(baseTicks);
                 List<Candle> baseCandles = MarketDataNormalizer.NormalizeHistory(
-                    ParseRows(
-                        page.Rows,
-                        CandleTimeframe.Tick(baseTicks),
-                        daily: false));
+                    ParseRows(page.Rows, baseTimeframe, daily: false),
+                    baseTimeframe,
+                    SourceArrayDirection.ReverseWhole);
                 List<Candle> result = NormalizeAndTail(
                     TickCandleAggregator.Aggregate(
                         baseCandles,
                         targetTicks,
                         baseTicks),
+                    request.Timeframe,
+                    SourceArrayDirection.Forward,
                     count);
                 int currentTickCount = Math.Min(
                     targetTicks,
@@ -99,6 +103,8 @@ public sealed partial class KiwoomRestDataSource
                     .ConfigureAwait(false);
                 List<Candle> result = NormalizeAndTail(
                     ParseRows(page.Rows, request.Timeframe, daily: false),
+                    request.Timeframe,
+                    SourceArrayDirection.ReverseWhole,
                     count);
                 SaveHistorySeed(symbol, result, 0);
                 return result;
@@ -169,7 +175,6 @@ public sealed partial class KiwoomRestDataSource
         CandleTimeframe timeframe,
         bool daily)
     {
-        rows.Reverse();
         var output = new List<Candle>(rows.Count);
         foreach (JsonElement row in rows)
         {
@@ -231,9 +236,14 @@ public sealed partial class KiwoomRestDataSource
 
     private static List<Candle> NormalizeAndTail(
         IReadOnlyList<Candle> source,
+        CandleTimeframe timeframe,
+        SourceArrayDirection direction,
         int count)
     {
-        List<Candle> normalized = MarketDataNormalizer.NormalizeHistory(source);
+        List<Candle> normalized = MarketDataNormalizer.NormalizeHistory(
+            source,
+            timeframe,
+            direction);
         return Tail(normalized, count);
     }
 
