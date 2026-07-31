@@ -34,7 +34,9 @@ internal sealed class MainForm : Form
     private string _selectedSymbol;
     private long _lastVersion = -1;
     private bool _dragging;
+    private bool _draggingPricePanel;
     private int _lastDragX;
+    private int _lastDragY;
     private double _dragBarRemainder;
     private int _closing;
 
@@ -46,7 +48,9 @@ internal sealed class MainForm : Form
         _viewport = new ChartViewport(
             visibleBars: Math.Clamp(options.HistoryCount, 20, 240),
             minimumVisibleBars: 20,
-            maximumVisibleBars: 5_000);
+            maximumVisibleBars: 5_000,
+            rightBlankBars: 12,
+            maximumRightBlankBars: 240);
         _engine = new MultiSymbolEngine(new MultiSymbolEngineOptions(
             WorkerCount: 0,
             QueueCapacityPerWorker: 8192,
@@ -201,7 +205,8 @@ internal sealed class MainForm : Form
             : _viewport.Resolve(snapshot.Candles.Length);
         _status.Text =
             $"{_source.Name} | {_options.Timeframe} | " +
-            $"bars {window.Count:N0} offset {_viewport.RightOffsetBars:N0} | " +
+            $"bars {window.Count:N0} gap {window.RightBlankBars:N0} " +
+            $"offset {_viewport.RightOffsetBars:N0} | " +
             $"events {metrics.ProcessedEvents:N0} | " +
             $"queue max {metrics.MaxQueueDepth:N0} | " +
             $"latency {metrics.LastLatencyMicroseconds:N0}us";
@@ -257,11 +262,16 @@ internal sealed class MainForm : Form
         if (e.Button != MouseButtons.Left) return;
         _dragging = true;
         _lastDragX = e.X;
+        _lastDragY = e.Y;
         _dragBarRemainder = 0d;
         _chart.Capture = true;
         _chart.Focus();
         if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+        {
             UpdateCursor(e.X, e.Y, snapshot);
+            _draggingPricePanel = e.Y >= _chartFrame.MainPanel.Top &&
+                                  e.Y <= _chartFrame.MainPanel.Bottom;
+        }
     }
 
     private void OnChartMouseMove(object? sender, MouseEventArgs e)
@@ -273,16 +283,27 @@ internal sealed class MainForm : Form
         if (_dragging)
         {
             int deltaPixels = e.X - _lastDragX;
+            int deltaY = e.Y - _lastDragY;
             _lastDragX = e.X;
+            _lastDragY = e.Y;
             double pixelsPerBar = Math.Max(
                 1d,
-                (double)Math.Max(1, _chart.ClientSize.Width) / window.Count);
+                (double)Math.Max(1, _chart.ClientSize.Width) /
+                Math.Max(1, window.VisibleSlotCount));
             _dragBarRemainder += deltaPixels / pixelsPerBar;
             int deltaBars = (int)Math.Truncate(_dragBarRemainder);
             if (deltaBars != 0)
             {
                 _dragBarRemainder -= deltaBars;
                 _viewport.Pan(deltaBars, snapshot.Candles.Length);
+            }
+
+            if (_draggingPricePanel && deltaY != 0)
+            {
+                float panelHeight = _chartFrame.MainPanel.IsEmpty
+                    ? Math.Max(1f, _chart.ClientSize.Height * _layoutOptions.MainPanelRatio)
+                    : _chartFrame.MainPanel.Height;
+                _viewport.PanPricePixels(deltaY, panelHeight);
             }
         }
 
@@ -294,6 +315,7 @@ internal sealed class MainForm : Form
     {
         if (e.Button != MouseButtons.Left) return;
         _dragging = false;
+        _draggingPricePanel = false;
         _dragBarRemainder = 0d;
         _chart.Capture = false;
     }
@@ -381,7 +403,8 @@ internal sealed class MainForm : Form
             width,
             height,
             _layoutOptions,
-            _chartFrame);
+            _chartFrame,
+            transform: _viewport.Transform);
     }
 
     private bool TryGetSelectedSnapshot(
