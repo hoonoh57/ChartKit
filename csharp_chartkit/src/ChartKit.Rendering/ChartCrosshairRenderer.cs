@@ -25,15 +25,15 @@ public sealed class ChartCrosshairRenderer : IDisposable
     {
         Color = new SKColor(235, 240, 245),
         Style = SKPaintStyle.Fill,
-        TextSize = 13f,
         IsAntialias = true
     };
+    private readonly SKFont _font = new(SKTypeface.Default, 13f);
     private readonly SKPath _path = new();
+    private SKTextBlob? _priceBlob;
+    private SKTextBlob? _timeBlob;
+    private SKTextBlob? _ohlcvBlob;
     private int _lastCandleIndex = -1;
     private int _lastPriceBits;
-    private string _priceLabel = "";
-    private string _timeLabel = "";
-    private string _ohlcvLabel = "";
     private int _disposed;
 
     public void Render(
@@ -57,7 +57,7 @@ public sealed class ChartCrosshairRenderer : IDisposable
         DrawPriceLabel(canvas, frame, cursor.Y);
         DrawTimeLabel(canvas, frame, cursor.X);
         canvas.DrawText(
-            _ohlcvLabel,
+            _ohlcvBlob!,
             frame.MainPanel.Left + 6f,
             frame.MainPanel.Top + 16f,
             _labelTextPaint);
@@ -70,20 +70,30 @@ public sealed class ChartCrosshairRenderer : IDisposable
 
         _lastCandleIndex = cursor.CandleIndex;
         _lastPriceBits = priceBits;
-        _priceLabel = FormatNumber(cursor.Price);
-        _timeLabel = cursor.Candle.OpenTime.ToString(
+        string priceLabel = FormatNumber(cursor.Price);
+        string timeLabel = cursor.Candle.OpenTime.ToString(
             "yyyy-MM-dd HH:mm:ss",
             CultureInfo.InvariantCulture);
         Candle candle = cursor.Candle;
-        _ohlcvLabel =
+        string ohlcvLabel =
             $"O {FormatNumber(candle.Open)}  H {FormatNumber(candle.High)}  " +
             $"L {FormatNumber(candle.Low)}  C {FormatNumber(candle.Close)}  " +
             $"V {candle.Volume.ToString("N0", CultureInfo.InvariantCulture)}";
+
+        _priceBlob?.Dispose();
+        _timeBlob?.Dispose();
+        _ohlcvBlob?.Dispose();
+        _priceBlob = SKTextBlob.Create(priceLabel, _font) ??
+                     throw new InvalidOperationException("Price label shaping failed.");
+        _timeBlob = SKTextBlob.Create(timeLabel, _font) ??
+                    throw new InvalidOperationException("Time label shaping failed.");
+        _ohlcvBlob = SKTextBlob.Create(ohlcvLabel, _font) ??
+                     throw new InvalidOperationException("OHLCV label shaping failed.");
     }
 
     private void DrawPriceLabel(SKCanvas canvas, ChartFrame frame, float y)
     {
-        float width = _labelTextPaint.MeasureText(_priceLabel) + 10f;
+        float width = _priceBlob!.Bounds.Width + 10f;
         float height = 20f;
         float top = Math.Clamp(
             y - height * 0.5f,
@@ -96,7 +106,7 @@ public sealed class ChartCrosshairRenderer : IDisposable
             top + height);
         canvas.DrawRect(rect, _labelBackgroundPaint);
         canvas.DrawText(
-            _priceLabel,
+            _priceBlob,
             rect.Left + 5f,
             rect.Top + 15f,
             _labelTextPaint);
@@ -104,7 +114,7 @@ public sealed class ChartCrosshairRenderer : IDisposable
 
     private void DrawTimeLabel(SKCanvas canvas, ChartFrame frame, float x)
     {
-        float width = _labelTextPaint.MeasureText(_timeLabel) + 10f;
+        float width = _timeBlob!.Bounds.Width + 10f;
         float height = 20f;
         float left = Math.Clamp(
             x - width * 0.5f,
@@ -117,7 +127,7 @@ public sealed class ChartCrosshairRenderer : IDisposable
             Math.Min(frame.Bounds.Bottom, frame.TimeAxis.Top + height));
         canvas.DrawRect(rect, _labelBackgroundPaint);
         canvas.DrawText(
-            _timeLabel,
+            _timeBlob,
             rect.Left + 5f,
             rect.Top + 15f,
             _labelTextPaint);
@@ -134,6 +144,10 @@ public sealed class ChartCrosshairRenderer : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _priceBlob?.Dispose();
+        _timeBlob?.Dispose();
+        _ohlcvBlob?.Dispose();
+        _font.Dispose();
         _linePaint.PathEffect?.Dispose();
         _linePaint.Dispose();
         _labelBackgroundPaint.Dispose();
