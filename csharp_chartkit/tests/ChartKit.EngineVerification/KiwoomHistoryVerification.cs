@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Net;
+using System.Text;
 using ChartKit.CSharp.Contracts;
 using ChartKit.CSharp.DataSources;
 
@@ -7,6 +9,15 @@ namespace ChartKit.CSharp.EngineVerification;
 internal static class KiwoomHistoryVerification
 {
     public static async Task RunAsync()
+    {
+        await VerifyBasicHistoryAndMetadataAsync();
+        await VerifyPagedHistoryCountAsync();
+        Console.WriteLine("csharp_kiwoom_history=PASS");
+        Console.WriteLine("csharp_kiwoom_paged_history_count=PASS");
+        Console.WriteLine("csharp_instrument_metadata=PASS");
+    }
+
+    private static async Task VerifyBasicHistoryAndMetadataAsync()
     {
         int tokenCalls = 0;
         int chartCalls = 0;
@@ -83,8 +94,87 @@ internal static class KiwoomHistoryVerification
             metadata.DisplayName != "SK하이닉스" ||
             metadata.Market != "NXT")
             throw new InvalidOperationException("Instrument metadata mapping failed.");
+    }
 
-        Console.WriteLine("csharp_kiwoom_history=PASS");
-        Console.WriteLine("csharp_instrument_metadata=PASS");
+    private static async Task VerifyPagedHistoryCountAsync()
+    {
+        int chartPage = 0;
+        var handler = new ScriptedHttpHandler((request, _) =>
+        {
+            string path = request.RequestUri?.AbsolutePath ?? "";
+            if (path == "/oauth2/token")
+            {
+                return ScriptedHttpHandler.Json(
+                    HttpStatusCode.OK,
+                    "{\"token\":\"paged-token\",\"expires_in\":3600}");
+            }
+            if (path != "/api/dostk/chart")
+                return ScriptedHttpHandler.Json(HttpStatusCode.NotFound, "{}");
+
+            int page = chartPage++;
+            int newestValue = 300 - page * 100;
+            string json = BuildMinutePage(newestValue, 100);
+            return page switch
+            {
+                0 => ScriptedHttpHandler.Json(
+                    HttpStatusCode.OK, json, continuation: "Y", nextKey: "K1"),
+                1 => ScriptedHttpHandler.Json(
+                    HttpStatusCode.OK, json, continuation: "Y", nextKey: "K2"),
+                _ => ScriptedHttpHandler.Json(HttpStatusCode.OK, json)
+            };
+        });
+
+        await using var session = new KiwoomApiSession(
+            KiwoomSessionVerification.Options(TimeSpan.Zero),
+            handler,
+            new FakeKiwoomClock());
+        await using var source = new KiwoomRestDataSource(session: session);
+        IReadOnlyList<Candle> candles = await source.GetHistoryAsync(
+            new HistoryRequest("000660", CandleTimeframe.Minute(1), 250),
+            CancellationToken.None);
+
+        if (candles.Count != 250)
+            throw new InvalidOperationException(
+                $"Paged history did not return the requested count: {candles.Count}.");
+        if (candles[0].Close != 51f || candles[^1].Close != 300f)
+            throw new InvalidOperationException("Paged history tail selection failed.");
+        if (candles[0].Sequence != 0 || candles[^1].Sequence != 249)
+            throw new InvalidOperationException("Paged history sequence mapping failed.");
+
+        HttpCall[] calls = handler.Calls
+            .Where(call => call.Path == "/api/dostk/chart")
+            .ToArray();
+        if (calls.Length != 3 ||
+            calls[0].Continuation != "N" || calls[0].NextKey.Length != 0 ||
+            calls[1].Continuation != "Y" || calls[1].NextKey != "K1" ||
+            calls[2].Continuation != "Y" || calls[2].NextKey != "K2")
+            throw new InvalidOperationException("Paged history continuation contract failed.");
+    }
+
+    private static string BuildMinutePage(int newestValue, int count)
+    {
+        DateTime latest = new(2026, 7, 30, 15, 30, 0);
+        var builder = new StringBuilder();
+        builder.Append("{\"stk_min_pole_chart_qry\":[");
+        for (int index = 0; index < count; index++)
+        {
+            if (index > 0) builder.Append(',');
+            int value = newestValue - index;
+            int globalOffset = 300 - value;
+            DateTime time = latest.AddMinutes(-globalOffset);
+            builder.Append("{\"cur_prc\":\"+")
+                .Append(value.ToString(CultureInfo.InvariantCulture))
+                .Append("\",\"open_pric\":\"+")
+                .Append(value.ToString(CultureInfo.InvariantCulture))
+                .Append("\",\"high_pric\":\"+")
+                .Append((value + 1).ToString(CultureInfo.InvariantCulture))
+                .Append("\",\"low_pric\":\"+")
+                .Append(Math.Max(1, value - 1).ToString(CultureInfo.InvariantCulture))
+                .Append("\",\"trde_qty\":\"1\",\"cntr_tm\":\"")
+                .Append(time.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture))
+                .Append("\"}");
+        }
+        builder.Append("]}");
+        return builder.ToString();
     }
 }
