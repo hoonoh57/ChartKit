@@ -24,9 +24,9 @@ foreach (Type type in indicatorTypes)
     Console.WriteLine($"indicator_display_name={displayNameProperty?.GetValue(instance)}");
     Console.WriteLine($"indicator_panel={panelProperty?.GetValue(instance)}");
 
-    if (parametersProperty?.GetValue(instance) is IDictionary parameters)
+    if (parametersProperty?.GetValue(instance) is IEnumerable parameters)
     {
-        foreach (DictionaryEntry entry in parameters.Cast<DictionaryEntry>()
+        foreach ((object? Key, object? Value) entry in EnumeratePairs(parameters)
                      .OrderBy(entry => entry.Key?.ToString(), StringComparer.Ordinal))
         {
             string valueType = entry.Value?.GetType().FullName ?? "null";
@@ -43,10 +43,10 @@ foreach (Type type in indicatorTypes)
         if (last is not null)
         {
             PropertyInfo? valuesProperty = last.GetType().GetProperty("Values");
-            if (valuesProperty?.GetValue(last) is IDictionary values)
+            if (valuesProperty?.GetValue(last) is IEnumerable values)
             {
-                Console.WriteLine("result_keys=" + string.Join("|", values.Keys.Cast<object>()
-                    .Select(key => key.ToString())
+                Console.WriteLine("result_keys=" + string.Join("|", EnumeratePairs(values)
+                    .Select(pair => pair.Key?.ToString())
                     .OrderBy(key => key, StringComparer.Ordinal)));
             }
         }
@@ -55,6 +55,19 @@ foreach (Type type in indicatorTypes)
 }
 Console.WriteLine("legacy_inventory=PASS");
 return 0;
+
+static IEnumerable<(object? Key, object? Value)> EnumeratePairs(IEnumerable source)
+{
+    foreach (object item in source)
+    {
+        Type pairType = item.GetType();
+        PropertyInfo key = pairType.GetProperty("Key")
+            ?? throw new InvalidOperationException($"Dictionary item has no Key: {pairType.FullName}");
+        PropertyInfo value = pairType.GetProperty("Value")
+            ?? throw new InvalidOperationException($"Dictionary item has no Value: {pairType.FullName}");
+        yield return (key.GetValue(item), value.GetValue(item));
+    }
+}
 
 static object CreateDefault(Type type)
 {
