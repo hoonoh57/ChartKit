@@ -15,15 +15,21 @@ permissions:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Restore CSharp engine verification
+      - name: Restore CSharp verification
         run: dotnet restore .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj
-      - name: Build CSharp engine verification
+      - name: Build CSharp verification
         run: dotnet build .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj -c Release --no-restore
-      - name: Run CSharp engine verification
+      - name: Run CSharp verification
         run: dotnet run --project .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj -c Release --no-build
+      - name: Restore CSharp application
+        run: dotnet restore .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj
+      - name: Build CSharp application
+        run: dotnet build .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-restore
+      - name: Run CSharp application self-test
+        run: dotnet run --project .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-build -- --self-test --count 120
