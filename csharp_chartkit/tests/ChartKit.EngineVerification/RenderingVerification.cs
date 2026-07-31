@@ -27,12 +27,14 @@ internal static class RenderingVerification
         using var canvas = new SKCanvas(bitmap);
         using var renderer = new SkiaChartRenderer();
         var viewport = new ChartViewport(180, 20, 500);
+        var frameBuilder = new ChartFrameBuilder();
+        var frame = new ChartFrame();
         ChartWindow window = viewport.Resolve(snapshot.Candles.Length);
-        var options = new ChartRenderOptions(ShowText: false);
-        var bounds = new SKRect(0, 0, bitmap.Width, bitmap.Height);
+        frameBuilder.Build(snapshot, window, bitmap.Width, bitmap.Height, target: frame);
+        var options = new ChartRenderOptions(ShowText: false, ShowAxes: false);
 
         for (int index = 0; index < 20; index++)
-            renderer.Render(canvas, bounds, snapshot, window, options);
+            renderer.Render(canvas, snapshot, frame, options);
         canvas.Flush();
 
         GC.Collect();
@@ -40,7 +42,7 @@ internal static class RenderingVerification
         GC.Collect();
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < 200; index++)
-            renderer.Render(canvas, bounds, snapshot, window, options);
+            renderer.Render(canvas, snapshot, frame, options);
         canvas.Flush();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
@@ -51,7 +53,12 @@ internal static class RenderingVerification
         ChartWindow panned = viewport.Pan(40, snapshot.Candles.Length);
         if (panned.StartIndex >= window.StartIndex)
             throw new InvalidOperationException("Renderer viewport did not move to older candles.");
-        renderer.Render(canvas, bounds, snapshot, panned, options);
+        frameBuilder.Build(snapshot, panned, bitmap.Width, bitmap.Height, target: frame);
+        renderer.Render(
+            canvas,
+            snapshot,
+            frame,
+            new ChartRenderOptions(ShowText: true, ShowAxes: true));
         canvas.Flush();
 
         SKColor background = new(11, 15, 20);
