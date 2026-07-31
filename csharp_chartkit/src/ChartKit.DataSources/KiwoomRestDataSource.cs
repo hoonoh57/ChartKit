@@ -3,7 +3,9 @@ using ChartKit.CSharp.Contracts;
 
 namespace ChartKit.CSharp.DataSources;
 
-public sealed partial class KiwoomRestDataSource : IMarketDataSource
+public sealed partial class KiwoomRestDataSource :
+    IMarketDataSource,
+    IInstrumentMetadataSource
 {
     private readonly KiwoomApiSession _session;
     private readonly bool _ownsSession;
