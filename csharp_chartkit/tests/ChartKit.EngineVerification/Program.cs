@@ -6,6 +6,7 @@ try
     IndicatorVerification.Run();
     ChartViewportVerification.Run();
     ChartFrameVerification.Run();
+    PriceGridVerification.Run();
     ChartCursorVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
