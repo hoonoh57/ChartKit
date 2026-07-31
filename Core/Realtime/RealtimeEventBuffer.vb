@@ -49,7 +49,7 @@ Namespace Core
                                 candle As CandleItem) As Boolean
             If candle Is Nothing Then Return False
 
-            Dim snapshot As CandleItem = CloneCandle(candle)
+            Dim snapshot As CandleItem = candle.Copy()
 
             SyncLock _sync
                 If generation <> _generation Then Return False
@@ -104,16 +104,5 @@ Namespace Core
                 End SyncLock
             End Get
         End Property
-
-        Private Shared Function CloneCandle(source As CandleItem) As CandleItem
-            Return New CandleItem With {
-                .Dt = source.Dt,
-                .Open = source.Open,
-                .High = source.High,
-                .Low = source.Low,
-                .Close = source.Close,
-                .Volume = source.Volume
-            }
-        End Function
     End Class
 End Namespace
