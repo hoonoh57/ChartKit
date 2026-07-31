@@ -58,6 +58,17 @@ public sealed class ChartCursorController
         float y = Math.Clamp(pointerY, panel.Top, panel.Bottom);
         float value = ResolveAxisValue(y, panelIndex, panel, frame);
 
+        if (panelIndex == 0)
+        {
+            value = frame.PriceGrid.Snap(value, PriceSnapMode.Nearest);
+            value = Math.Clamp(value, frame.PriceRange.Minimum, frame.PriceRange.Maximum);
+            y = frame.PriceY(value);
+        }
+        else if (panelIndex == ChartCursorSnapshot.VolumePanelIndex)
+        {
+            value = MathF.Round(Math.Max(0f, value));
+        }
+
         Current = new ChartCursorSnapshot(
             true,
             candleIndex,
