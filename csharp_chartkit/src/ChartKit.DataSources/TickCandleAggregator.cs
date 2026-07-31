@@ -25,7 +25,7 @@ public static class TickCandleAggregator
         if (targetTicks % baseTicks != 0)
             throw new ArgumentException("Target ticks must be divisible by base ticks.");
 
-        IReadOnlyList<Candle> ordered = EnsureAscending(source);
+        IReadOnlyList<Candle> ordered = EnsureForwardDirection(source);
         var output = new List<Candle>();
         if (ordered.Count == 0) return output;
         int groupSize = targetTicks / baseTicks;
@@ -48,32 +48,32 @@ public static class TickCandleAggregator
         return output;
     }
 
-    private static IReadOnlyList<Candle> EnsureAscending(
+    private static IReadOnlyList<Candle> EnsureForwardDirection(
         IReadOnlyList<Candle> source)
     {
-        int inversion = -1;
+        int direction = 0;
         for (int index = 1; index < source.Count; index++)
         {
-            if (CompareChronology(source[index - 1], source[index]) <= 0) continue;
-            inversion = index;
-            break;
+            int comparison = source[index].CloseTime.CompareTo(
+                source[index - 1].CloseTime);
+            if (comparison == 0) continue;
+            int currentDirection = comparison > 0 ? 1 : -1;
+            if (direction == 0)
+            {
+                direction = currentDirection;
+                continue;
+            }
+            if (direction != currentDirection)
+                throw new InvalidDataException(
+                    "Tick candle direction is mixed. Time-based sorting is forbidden " +
+                    "because equal HHmm timestamps carry order only in the array.");
         }
-        if (inversion < 0) return source;
 
-        var ordered = new List<Candle>(source.Count);
-        for (int index = 0; index < source.Count; index++)
-            ordered.Add(source[index]);
-        ordered.Sort(static (left, right) => CompareChronology(left, right));
-        return ordered;
-    }
-
-    private static int CompareChronology(Candle left, Candle right)
-    {
-        int result = left.CloseTime.CompareTo(right.CloseTime);
-        if (result != 0) return result;
-        result = left.OpenTime.CompareTo(right.OpenTime);
-        if (result != 0) return result;
-        return left.Sequence.CompareTo(right.Sequence);
+        if (direction >= 0) return source;
+        var reversed = new List<Candle>(source.Count);
+        for (int index = source.Count - 1; index >= 0; index--)
+            reversed.Add(source[index]);
+        return reversed;
     }
 
     private static void AggregateDay(
