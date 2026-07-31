@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>ChartKit</RootNamespace>
+    <AssemblyName>ChartKit.Core</AssemblyName>
+    <Nullable>disable</Nullable>
+    <OptionStrict>On</OptionStrict>
+    <OptionExplicit>On</OptionExplicit>
+    <OptionInfer>Off</OptionInfer>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\Abstractions\**\*.vb"
+             Link="Abstractions\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\..\Models\**\*.vb"
+             Link="Models\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\..\Indicators\**\*.vb"
+             Link="Indicators\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\..\Core\**\*.vb"
+             Link="Core\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\..\Layers\**\*.vb"
+             Link="Layers\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="2.88.8" />
+    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="2.88.8" />
+  </ItemGroup>
+</Project>
