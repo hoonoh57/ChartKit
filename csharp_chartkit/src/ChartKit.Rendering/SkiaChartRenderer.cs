@@ -7,11 +7,9 @@ namespace ChartKit.CSharp.Rendering;
 
 public sealed partial class SkiaChartRenderer : IDisposable
 {
-    private const int MaximumPanelIndex = 7;
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _gridPaint;
-    private readonly SKPaint _upPaint;
-    private readonly SKPaint _downPaint;
+    private readonly SKPaint _dateBoundaryPaint;
     private readonly SKPaint _upFillPaint;
     private readonly SKPaint _downFillPaint;
     private readonly SKPaint _upVolumePaint;
@@ -19,6 +17,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
     private readonly SKPaint _textPaint;
     private readonly SKPaint[] _seriesPaints;
     private readonly SKPath _gridPath = new();
+    private readonly SKPath _dateBoundaryPath = new();
     private readonly SKPath _wickPath = new();
     private readonly SKPath _upBodyPath = new();
     private readonly SKPath _downBodyPath = new();
@@ -26,28 +25,13 @@ public sealed partial class SkiaChartRenderer : IDisposable
     private readonly SKPath _downVolumePath = new();
     private readonly SKPath _seriesPath = new();
     private readonly SKPath _histogramPath = new();
-    private readonly SKRect[] _panelRects = new SKRect[MaximumPanelIndex + 1];
-    private readonly bool[] _panelVisible = new bool[MaximumPanelIndex + 1];
-    private readonly float[] _panelMinimum = new float[MaximumPanelIndex + 1];
-    private readonly float[] _panelMaximum = new float[MaximumPanelIndex + 1];
-
-    private SKRect _mainRect;
-    private SKRect _volumeRect;
-    private int _startIndex;
-    private int _visibleCount;
-    private float _priceMinimum;
-    private float _priceMaximum;
-    private long _volumeMaximum;
-    private float _step;
-    private float _bodyWidth;
     private int _disposed;
 
     public SkiaChartRenderer()
     {
         _backgroundPaint = Fill(new SKColor(11, 15, 20));
         _gridPaint = Stroke(new SKColor(36, 46, 58), 1f);
-        _upPaint = Stroke(new SKColor(239, 83, 80), 1f);
-        _downPaint = Stroke(new SKColor(66, 133, 244), 1f);
+        _dateBoundaryPaint = Stroke(new SKColor(70, 83, 98), 1.2f);
         _upFillPaint = Fill(new SKColor(239, 83, 80));
         _downFillPaint = Fill(new SKColor(66, 133, 244));
         _upVolumePaint = Fill(new SKColor(239, 83, 80, 150));
@@ -70,182 +54,77 @@ public sealed partial class SkiaChartRenderer : IDisposable
 
     public void Render(
         SKCanvas canvas,
-        SKRect bounds,
         SymbolSnapshot snapshot,
-        ChartWindow window,
+        ChartFrame frame,
         ChartRenderOptions? options = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(frame);
         ChartRenderOptions settings = options ?? ChartRenderOptions.Default;
         settings.Validate();
 
+        ChartRectF bounds = frame.Bounds;
         canvas.Save();
-        canvas.ClipRect(bounds);
-        canvas.DrawRect(bounds, _backgroundPaint);
-        if (snapshot.Candles.Length == 0 || window.IsEmpty)
+        canvas.ClipRect(ToSkRect(bounds));
+        canvas.DrawRect(ToSkRect(bounds), _backgroundPaint);
+        if (snapshot.Candles.Length == 0 || frame.Window.IsEmpty)
         {
             canvas.Restore();
             return;
         }
-        if (window.StartIndex < 0 || window.Count <= 0 ||
-            window.EndExclusive > snapshot.Candles.Length)
+        if (frame.Window.StartIndex < 0 || frame.Window.Count <= 0 ||
+            frame.Window.EndExclusive > snapshot.Candles.Length)
         {
             canvas.Restore();
-            throw new ArgumentOutOfRangeException(nameof(window));
+            throw new ArgumentOutOfRangeException(nameof(frame));
         }
 
-        PrepareLayout(bounds, snapshot, window, settings);
-        DrawGrid(canvas);
-        DrawCandles(canvas, snapshot);
-        DrawIndicatorSeries(canvas, snapshot);
-        if (settings.ShowText) DrawHeader(canvas, bounds, snapshot);
+        DrawGrid(canvas, frame);
+        DrawCandles(canvas, snapshot, frame);
+        DrawIndicatorSeries(canvas, snapshot, frame);
+        if (settings.ShowAxes) DrawAxes(canvas, frame);
+        if (settings.ShowText) DrawHeader(canvas, snapshot, frame);
         canvas.Restore();
     }
 
-    private void PrepareLayout(
-        SKRect bounds,
-        SymbolSnapshot snapshot,
-        ChartWindow window,
-        ChartRenderOptions options)
-    {
-        Array.Clear(_panelVisible);
-        int panelCount = 0;
-        foreach (IndicatorSeriesSnapshot series in snapshot.Indicators)
-        {
-            int panel = series.Descriptor.PanelIndex;
-            if (panel <= 0 || panel > MaximumPanelIndex || _panelVisible[panel]) continue;
-            _panelVisible[panel] = true;
-            panelCount++;
-        }
-
-        float left = bounds.Left + options.LeftPadding;
-        float right = Math.Max(left + 1f, bounds.Right - options.RightPadding);
-        float top = bounds.Top + options.TopPadding;
-        float bottom = Math.Max(top + 1f, bounds.Bottom - options.BottomPadding);
-        float totalHeight = bottom - top;
-        float mainHeight = totalHeight * options.MainPanelRatio;
-        float volumeHeight = totalHeight * options.VolumePanelRatio;
-        _mainRect = new SKRect(left, top, right, top + mainHeight);
-        _volumeRect = new SKRect(left, _mainRect.Bottom, right, _mainRect.Bottom + volumeHeight);
-
-        float remaining = Math.Max(0f, bottom - _volumeRect.Bottom);
-        float panelHeight = panelCount == 0 ? 0f : remaining / panelCount;
-        float panelTop = _volumeRect.Bottom;
-        for (int panel = 1; panel <= MaximumPanelIndex; panel++)
-        {
-            if (!_panelVisible[panel])
-            {
-                _panelRects[panel] = SKRect.Empty;
-                continue;
-            }
-            _panelRects[panel] = new SKRect(left, panelTop, right, panelTop + panelHeight);
-            panelTop += panelHeight;
-        }
-
-        _startIndex = window.StartIndex;
-        _visibleCount = window.Count;
-        _step = _mainRect.Width / Math.Max(1, _visibleCount);
-        _bodyWidth = Math.Max(1f, _step * 0.72f);
-        CalculateRanges(snapshot);
-    }
-
-    private void CalculateRanges(SymbolSnapshot snapshot)
-    {
-        _priceMinimum = float.MaxValue;
-        _priceMaximum = float.MinValue;
-        _volumeMaximum = 1;
-        int candleEnd = _startIndex + _visibleCount;
-        for (int index = _startIndex; index < candleEnd; index++)
-        {
-            Candle candle = snapshot.Candles[index];
-            _priceMinimum = Math.Min(_priceMinimum, candle.Low);
-            _priceMaximum = Math.Max(_priceMaximum, candle.High);
-            _volumeMaximum = Math.Max(_volumeMaximum, candle.Volume);
-        }
-        if (_priceMinimum == float.MaxValue || _priceMaximum == float.MinValue)
-        {
-            _priceMinimum = 0f;
-            _priceMaximum = 1f;
-        }
-        float priceMargin = Math.Max(0.01f, (_priceMaximum - _priceMinimum) * 0.05f);
-        _priceMinimum -= priceMargin;
-        _priceMaximum += priceMargin;
-
-        for (int panel = 0; panel <= MaximumPanelIndex; panel++)
-        {
-            _panelMinimum[panel] = float.MaxValue;
-            _panelMaximum[panel] = float.MinValue;
-        }
-
-        foreach (IndicatorSeriesSnapshot series in snapshot.Indicators)
-        {
-            int panel = series.Descriptor.PanelIndex;
-            if (panel <= 0 || panel > MaximumPanelIndex) continue;
-            int pointStart = Math.Min(_startIndex, series.Points.Length);
-            int pointEnd = Math.Min(candleEnd, series.Points.Length);
-            for (int pointIndex = pointStart; pointIndex < pointEnd; pointIndex++)
-            {
-                IndicatorPoint point = series.Points[pointIndex];
-                for (int valueIndex = 0; valueIndex < series.Descriptor.ValueCount; valueIndex++)
-                {
-                    if (series.Descriptor.Kinds[valueIndex] == SeriesKind.Meta) continue;
-                    float value = point.GetValue(valueIndex);
-                    if (!float.IsFinite(value)) continue;
-                    _panelMinimum[panel] = Math.Min(_panelMinimum[panel], value);
-                    _panelMaximum[panel] = Math.Max(_panelMaximum[panel], value);
-                }
-            }
-        }
-
-        for (int panel = 1; panel <= MaximumPanelIndex; panel++)
-        {
-            if (!_panelVisible[panel]) continue;
-            if (_panelMinimum[panel] == float.MaxValue || _panelMaximum[panel] == float.MinValue)
-            {
-                _panelMinimum[panel] = 0f;
-                _panelMaximum[panel] = 1f;
-            }
-            float range = _panelMaximum[panel] - _panelMinimum[panel];
-            float margin = Math.Max(0.001f, range * 0.08f);
-            _panelMinimum[panel] -= margin;
-            _panelMaximum[panel] += margin;
-        }
-    }
-
-    private void DrawGrid(SKCanvas canvas)
+    private void DrawGrid(SKCanvas canvas, ChartFrame frame)
     {
         _gridPath.Rewind();
-        for (int row = 0; row <= 5; row++)
+        _dateBoundaryPath.Rewind();
+
+        for (int index = 0; index < frame.PriceTickCount; index++)
         {
-            float y = _mainRect.Top + _mainRect.Height * row / 5f;
-            _gridPath.MoveTo(_mainRect.Left, y);
-            _gridPath.LineTo(_mainRect.Right, y);
+            float y = frame.PriceTicks[index].Position;
+            _gridPath.MoveTo(frame.MainPanel.Left, y);
+            _gridPath.LineTo(frame.MainPanel.Right, y);
         }
-        for (int column = 0; column <= 8; column++)
+
+        float chartBottom = frame.TimeAxis.Top;
+        for (int index = 0; index < frame.TimeTickCount; index++)
         {
-            float x = _mainRect.Left + _mainRect.Width * column / 8f;
-            _gridPath.MoveTo(x, _mainRect.Top);
-            _gridPath.LineTo(x, _volumeRect.Bottom);
+            TimeAxisTick tick = frame.TimeTicks[index];
+            SKPath path = tick.IsDateBoundary ? _dateBoundaryPath : _gridPath;
+            path.MoveTo(tick.Position, frame.MainPanel.Top);
+            path.LineTo(tick.Position, chartBottom);
         }
-        _gridPath.MoveTo(_volumeRect.Left, _volumeRect.Top);
-        _gridPath.LineTo(_volumeRect.Right, _volumeRect.Top);
-        _gridPath.MoveTo(_volumeRect.Left, _volumeRect.Bottom);
-        _gridPath.LineTo(_volumeRect.Right, _volumeRect.Bottom);
-        for (int panel = 1; panel <= MaximumPanelIndex; panel++)
+
+        AddHorizontalBoundary(_gridPath, frame.VolumePanel);
+        for (int panel = 1; panel <= ChartFrame.MaximumPanelIndex; panel++)
         {
-            if (!_panelVisible[panel]) continue;
-            SKRect rect = _panelRects[panel];
-            _gridPath.MoveTo(rect.Left, rect.Top);
-            _gridPath.LineTo(rect.Right, rect.Top);
-            _gridPath.MoveTo(rect.Left, rect.Bottom);
-            _gridPath.LineTo(rect.Right, rect.Bottom);
+            if (!frame.PanelVisible[panel]) continue;
+            AddHorizontalBoundary(_gridPath, frame.PanelRects[panel]);
         }
+
         canvas.DrawPath(_gridPath, _gridPaint);
+        canvas.DrawPath(_dateBoundaryPath, _dateBoundaryPaint);
     }
 
-    private void DrawCandles(SKCanvas canvas, SymbolSnapshot snapshot)
+    private void DrawCandles(
+        SKCanvas canvas,
+        SymbolSnapshot snapshot,
+        ChartFrame frame)
     {
         _wickPath.Rewind();
         _upBodyPath.Rewind();
@@ -253,35 +132,39 @@ public sealed partial class SkiaChartRenderer : IDisposable
         _upVolumePath.Rewind();
         _downVolumePath.Rewind();
 
-        for (int index = 0; index < _visibleCount; index++)
+        for (int visibleIndex = 0;
+             visibleIndex < frame.Window.Count;
+             visibleIndex++)
         {
-            Candle candle = snapshot.Candles[_startIndex + index];
-            float x = X(index);
+            Candle candle = snapshot.Candles[
+                frame.Window.StartIndex + visibleIndex];
+            float x = frame.X(visibleIndex);
             bool rising = candle.Close >= candle.Open;
             SKPath bodyPath = rising ? _upBodyPath : _downBodyPath;
             SKPath volumePath = rising ? _upVolumePath : _downVolumePath;
 
-            _wickPath.MoveTo(x, PriceY(candle.High));
-            _wickPath.LineTo(x, PriceY(candle.Low));
+            _wickPath.MoveTo(x, frame.PriceY(candle.High));
+            _wickPath.LineTo(x, frame.PriceY(candle.Low));
 
-            float openY = PriceY(candle.Open);
-            float closeY = PriceY(candle.Close);
+            float openY = frame.PriceY(candle.Open);
+            float closeY = frame.PriceY(candle.Close);
             float top = Math.Min(openY, closeY);
             float bottom = Math.Max(openY, closeY);
             if (bottom - top < 1f) bottom = top + 1f;
             bodyPath.AddRect(new SKRect(
-                x - _bodyWidth / 2f,
+                x - frame.BodyWidth / 2f,
                 top,
-                x + _bodyWidth / 2f,
+                x + frame.BodyWidth / 2f,
                 bottom));
 
-            float volumeTop = _volumeRect.Bottom -
-                              _volumeRect.Height * candle.Volume / Math.Max(1f, _volumeMaximum);
+            float volumeTop = frame.VolumePanel.Bottom -
+                              frame.VolumePanel.Height * candle.Volume /
+                              Math.Max(1f, frame.VolumeMaximum);
             volumePath.AddRect(new SKRect(
-                x - _bodyWidth / 2f,
+                x - frame.BodyWidth / 2f,
                 volumeTop,
-                x + _bodyWidth / 2f,
-                _volumeRect.Bottom));
+                x + frame.BodyWidth / 2f,
+                frame.VolumePanel.Bottom));
         }
 
         canvas.DrawPath(_wickPath, _gridPaint);
@@ -291,24 +174,73 @@ public sealed partial class SkiaChartRenderer : IDisposable
         canvas.DrawPath(_downVolumePath, _downVolumePaint);
     }
 
-    private void DrawHeader(SKCanvas canvas, SKRect bounds, SymbolSnapshot snapshot)
+    private void DrawAxes(SKCanvas canvas, ChartFrame frame)
     {
-        Candle last = snapshot.Candles[_startIndex + _visibleCount - 1];
-        canvas.DrawText(snapshot.Symbol, bounds.Left + 10f, bounds.Top + 17f, _textPaint);
-        string price = last.Close.ToString("N2", CultureInfo.InvariantCulture);
-        canvas.DrawText(price, bounds.Right - 70f, bounds.Top + 17f, _textPaint);
+        for (int index = 0; index < frame.PriceTickCount; index++)
+        {
+            NumericAxisTick tick = frame.PriceTicks[index];
+            string label = FormatPrice(tick.Value);
+            canvas.DrawText(
+                label,
+                frame.MainPanel.Right + 6f,
+                tick.Position + 4f,
+                _textPaint);
+        }
+
+        for (int index = 0; index < frame.TimeTickCount; index++)
+        {
+            TimeAxisTick tick = frame.TimeTicks[index];
+            string label = tick.IsDateBoundary
+                ? tick.Time.ToString("MM/dd HH:mm", CultureInfo.InvariantCulture)
+                : tick.Time.ToString("HH:mm", CultureInfo.InvariantCulture);
+            float textWidth = _textPaint.MeasureText(label);
+            float x = Math.Clamp(
+                tick.Position - textWidth * 0.5f,
+                frame.TimeAxis.Left,
+                Math.Max(frame.TimeAxis.Left, frame.TimeAxis.Right - textWidth));
+            canvas.DrawText(label, x, frame.TimeAxis.Top + 17f, _textPaint);
+        }
     }
 
-    private float X(int visibleIndex) => _mainRect.Left + (visibleIndex + 0.5f) * _step;
-
-    private float PriceY(float value) => MapY(value, _priceMinimum, _priceMaximum, _mainRect);
-
-    private static float MapY(float value, float minimum, float maximum, SKRect rect)
+    private void DrawHeader(
+        SKCanvas canvas,
+        SymbolSnapshot snapshot,
+        ChartFrame frame)
     {
-        if (!float.IsFinite(value) || maximum <= minimum) return rect.MidY;
-        float ratio = (value - minimum) / (maximum - minimum);
-        return rect.Bottom - ratio * rect.Height;
+        Candle last = snapshot.Candles[frame.Window.EndExclusive - 1];
+        canvas.DrawText(
+            snapshot.Symbol,
+            frame.Bounds.Left + 10f,
+            frame.Bounds.Top + 17f,
+            _textPaint);
+        string price = FormatPrice(last.Close);
+        float width = _textPaint.MeasureText(price);
+        canvas.DrawText(
+            price,
+            frame.Bounds.Right - width - 6f,
+            frame.Bounds.Top + 17f,
+            _textPaint);
     }
+
+    private static void AddHorizontalBoundary(SKPath path, ChartRectF rect)
+    {
+        if (rect.IsEmpty) return;
+        path.MoveTo(rect.Left, rect.Top);
+        path.LineTo(rect.Right, rect.Top);
+        path.MoveTo(rect.Left, rect.Bottom);
+        path.LineTo(rect.Right, rect.Bottom);
+    }
+
+    private static string FormatPrice(float value)
+    {
+        float absolute = Math.Abs(value);
+        string format = absolute >= 100f ? "N0" :
+                        absolute >= 1f ? "N2" : "N4";
+        return value.ToString(format, CultureInfo.InvariantCulture);
+    }
+
+    private static SKRect ToSkRect(ChartRectF rect) =>
+        new(rect.Left, rect.Top, rect.Right, rect.Bottom);
 
     private static SKPaint Fill(SKColor color) => new()
     {
@@ -332,8 +264,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _backgroundPaint.Dispose();
         _gridPaint.Dispose();
-        _upPaint.Dispose();
-        _downPaint.Dispose();
+        _dateBoundaryPaint.Dispose();
         _upFillPaint.Dispose();
         _downFillPaint.Dispose();
         _upVolumePaint.Dispose();
@@ -341,6 +272,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
         _textPaint.Dispose();
         foreach (SKPaint paint in _seriesPaints) paint.Dispose();
         _gridPath.Dispose();
+        _dateBoundaryPath.Dispose();
         _wickPath.Dispose();
         _upBodyPath.Dispose();
         _downBodyPath.Dispose();
