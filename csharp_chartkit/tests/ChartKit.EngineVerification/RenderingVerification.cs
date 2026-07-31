@@ -1,3 +1,4 @@
+using ChartKit.CSharp.Charting;
 using ChartKit.CSharp.Contracts;
 using ChartKit.CSharp.Engine;
 using ChartKit.CSharp.Rendering;
@@ -25,11 +26,13 @@ internal static class RenderingVerification
             new SKImageInfo(1200, 800, SKColorType.Bgra8888, SKAlphaType.Premul));
         using var canvas = new SKCanvas(bitmap);
         using var renderer = new SkiaChartRenderer();
-        var options = new ChartRenderOptions(VisibleBars: 180, ShowText: false);
+        var viewport = new ChartViewport(180, 20, 500);
+        ChartWindow window = viewport.Resolve(snapshot.Candles.Length);
+        var options = new ChartRenderOptions(ShowText: false);
         var bounds = new SKRect(0, 0, bitmap.Width, bitmap.Height);
 
         for (int index = 0; index < 20; index++)
-            renderer.Render(canvas, bounds, snapshot, options);
+            renderer.Render(canvas, bounds, snapshot, window, options);
         canvas.Flush();
 
         GC.Collect();
@@ -37,13 +40,19 @@ internal static class RenderingVerification
         GC.Collect();
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int index = 0; index < 200; index++)
-            renderer.Render(canvas, bounds, snapshot, options);
+            renderer.Render(canvas, bounds, snapshot, window, options);
         canvas.Flush();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         if (allocated > 32_768)
             throw new InvalidOperationException(
                 $"Rendering allocation exceeded bound: {allocated} bytes.");
+
+        ChartWindow panned = viewport.Pan(40, snapshot.Candles.Length);
+        if (panned.StartIndex >= window.StartIndex)
+            throw new InvalidOperationException("Renderer viewport did not move to older candles.");
+        renderer.Render(canvas, bounds, snapshot, panned, options);
+        canvas.Flush();
 
         SKColor background = new(11, 15, 20);
         int changedSamples = 0;
