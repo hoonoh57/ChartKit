@@ -26,6 +26,11 @@ public readonly record struct TimeAxisTick(
     float Position,
     bool IsDateBoundary);
 
+public readonly record struct ChartViewTransform(float PricePanFraction)
+{
+    public static ChartViewTransform Default { get; } = new(0f);
+}
+
 public sealed record ChartLayoutOptions(
     float MainPanelRatio = 0.56f,
     float VolumePanelRatio = 0.10f,
@@ -33,6 +38,9 @@ public sealed record ChartLayoutOptions(
     float RightPadding = 82f,
     float TopPadding = 24f,
     float BottomPadding = 28f,
+    float PriceTopMarginRatio = 0.14f,
+    float PriceBottomMarginRatio = 0.06f,
+    int MinimumPriceMarginTicks = 4,
     int TargetPriceTickCount = 6,
     int TargetTimeTickCount = 8)
 {
@@ -46,6 +54,10 @@ public sealed record ChartLayoutOptions(
             throw new ArgumentOutOfRangeException(nameof(VolumePanelRatio));
         if (LeftPadding < 0f || RightPadding < 0f || TopPadding < 0f || BottomPadding < 0f)
             throw new ArgumentOutOfRangeException(nameof(LeftPadding));
+        if (PriceTopMarginRatio < 0f || PriceBottomMarginRatio < 0f)
+            throw new ArgumentOutOfRangeException(nameof(PriceTopMarginRatio));
+        if (MinimumPriceMarginTicks < 1 || MinimumPriceMarginTicks > 100)
+            throw new ArgumentOutOfRangeException(nameof(MinimumPriceMarginTicks));
         if (TargetPriceTickCount < 2 || TargetPriceTickCount > ChartFrame.MaximumAxisTickCount)
             throw new ArgumentOutOfRangeException(nameof(TargetPriceTickCount));
         if (TargetTimeTickCount < 2 || TargetTimeTickCount > ChartFrame.MaximumAxisTickCount)
@@ -64,6 +76,7 @@ public sealed class ChartFrame
     public ChartRectF VolumePanel { get; internal set; } = ChartRectF.Empty;
     public ChartRectF TimeAxis { get; internal set; } = ChartRectF.Empty;
     public NumericRange PriceRange { get; internal set; } = new(0f, 1f);
+    public IPriceGrid PriceGrid { get; internal set; } = KoreanEquityPriceGrid.Instance;
     public long VolumeMaximum { get; internal set; } = 1L;
     public float BarStep { get; internal set; } = 1f;
     public float BodyWidth { get; internal set; } = 1f;
