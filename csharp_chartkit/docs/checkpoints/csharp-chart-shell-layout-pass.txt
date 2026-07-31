@@ -1,0 +1,19 @@
+ChartKit C# chart shell layout checkpoint
+
+branch: csharp/standalone-engine
+commit: 75097a5556247d14abd291adc5a3731ffd3bd36f
+workflow_run: 30656084933
+workflow_job: 91240700519
+result: success
+
+Verified:
+- Release solution build
+- engine verification
+- application self-test
+- WinForms desktop shell startup smoke test
+- legacy VB/C# indicator parity
+- standalone Windows publish
+
+Fix:
+- Delay SplitContainer minimum sizes and splitter distance until a valid client width is available.
+- Calculate the initial splitter distance from the actual client width.
