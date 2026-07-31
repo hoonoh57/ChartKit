@@ -20,6 +20,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Diagnose Kiwoom client structure
+        shell: pwsh
+        run: |
+          Write-Host "===REPOSITORY_FILES==="
+          Get-ChildItem -Recurse -File |
+            Where-Object { $_.FullName -notmatch '\\(bin|obj|\.git)\\' } |
+            ForEach-Object { $_.FullName.Substring($PWD.Path.Length + 1) }
+
+          Write-Host "===KIWOOM_HTTP_MATCHES==="
+          $patterns = @('Kiwoom','HttpClient','Authorization','access_token','token','429','TooManyRequests','SemaphoreSlim','Task.Delay','rate','throttle')
+          Get-ChildItem -Recurse -File -Include *.vb,*.json,*.md,*.yml,*.yaml |
+            Where-Object { $_.FullName -notmatch '\\(bin|obj|\.git)\\' } |
+            Select-String -Pattern $patterns -SimpleMatch |
+            ForEach-Object { "{0}:{1}: {2}" -f $_.Path.Substring($PWD.Path.Length + 1), $_.LineNumber, $_.Line.Trim() }
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
