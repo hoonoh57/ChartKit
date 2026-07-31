@@ -15,6 +15,8 @@ Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyPanelLayout", "Tests\
 EndProject
 Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyIndicatorIdentity", "Tests\IndicatorIdentityVerification\VerifyIndicatorIdentity.vbproj", "{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}"
 EndProject
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyIncrementalEquivalence", "Tests\IncrementalEquivalenceVerification\VerifyIncrementalEquivalence.vbproj", "{0C96B653-A063-48D3-BE26-8F9040BC6F06}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -45,6 +47,10 @@ Global
 		{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FB85A542-9F52-47C2-AD15-7E8F3FAB5E05}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0C96B653-A063-48D3-BE26-8F9040BC6F06}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0C96B653-A063-48D3-BE26-8F9040BC6F06}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0C96B653-A063-48D3-BE26-8F9040BC6F06}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0C96B653-A063-48D3-BE26-8F9040BC6F06}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
