@@ -11,6 +11,8 @@ Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyCandleTime", "Tests\C
 EndProject
 Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyTickAggregation", "Tests\TickAggregationVerification\VerifyTickAggregation.vbproj", "{D9E69BC3-3DAE-4E6F-B092-5B3FB1C19C03}"
 EndProject
+Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "VerifyPanelLayout", "Tests\PanelLayoutVerification\VerifyPanelLayout.vbproj", "{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,6 +35,10 @@ Global
 		{D9E69BC3-3DAE-4E6F-B092-5B3FB1C19C03}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D9E69BC3-3DAE-4E6F-B092-5B3FB1C19C03}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D9E69BC3-3DAE-4E6F-B092-5B3FB1C19C03}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EA74F431-8E41-46B1-9C04-6D7F2E9A4D04}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
