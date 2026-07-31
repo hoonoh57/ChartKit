@@ -14,6 +14,10 @@ internal sealed class MainForm : Form
     private readonly IMarketDataSource _source;
     private readonly MultiSymbolEngine _engine;
     private readonly ChartViewport _viewport;
+    private readonly ChartFrameBuilder _frameBuilder = new();
+    private readonly ChartFrame _chartFrame = new();
+    private readonly ChartLayoutOptions _layoutOptions = new();
+    private readonly ChartRenderOptions _renderOptions = new(ShowText: true, ShowAxes: true);
     private readonly SkiaChartRenderer _renderer = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly ComboBox _symbols = new();
@@ -193,12 +197,24 @@ internal sealed class MainForm : Form
         }
 
         ChartWindow window = _viewport.Resolve(snapshot.Candles.Length);
-        _renderer.Render(
-            e.Surface.Canvas,
-            new SKRect(0, 0, e.Info.Width, e.Info.Height),
+        if (window.IsEmpty)
+        {
+            e.Surface.Canvas.Clear(new SKColor(11, 15, 20));
+            return;
+        }
+
+        _frameBuilder.Build(
             snapshot,
             window,
-            new ChartRenderOptions(ShowText: true));
+            e.Info.Width,
+            e.Info.Height,
+            _layoutOptions,
+            _chartFrame);
+        _renderer.Render(
+            e.Surface.Canvas,
+            snapshot,
+            _chartFrame,
+            _renderOptions);
     }
 
     private void OnChartMouseWheel(object? sender, MouseEventArgs e)
