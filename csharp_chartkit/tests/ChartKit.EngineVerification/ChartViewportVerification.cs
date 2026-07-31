@@ -46,9 +46,10 @@ internal static class ChartViewportVerification
             followed.RightBlankBars != 12)
             throw new InvalidOperationException("Viewport latest-follow failed.");
 
+        viewport.Reset(totalBars);
         ChartWindow future = viewport.Pan(-20, totalBars);
         if (future.EndExclusive != totalBars || future.RightBlankBars != 32 ||
-            future.Count != 128)
+            future.Count != 140 || future.VisibleSlotCount != 172)
             throw new InvalidOperationException("Viewport additional future-space panning failed.");
 
         viewport.PanPricePixels(80f, 400f);
