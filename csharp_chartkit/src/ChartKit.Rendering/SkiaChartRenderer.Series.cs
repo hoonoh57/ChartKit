@@ -41,14 +41,11 @@ public sealed partial class SkiaChartRenderer
         SKPaint paint)
     {
         _seriesPath.Rewind();
-        int pointStart = Math.Max(0, series.Points.Length - _visibleCount);
-        int available = series.Points.Length - pointStart;
-        int xOffset = _visibleCount - available;
+        int pointStart = Math.Min(_startIndex, series.Points.Length);
+        int pointEnd = Math.Min(_startIndex + _visibleCount, series.Points.Length);
         bool active = false;
 
-        for (int pointIndex = pointStart;
-             pointIndex < series.Points.Length;
-             pointIndex++)
+        for (int pointIndex = pointStart; pointIndex < pointEnd; pointIndex++)
         {
             float value = series.Points[pointIndex].GetValue(valueIndex);
             if (!float.IsFinite(value))
@@ -57,7 +54,7 @@ public sealed partial class SkiaChartRenderer
                 continue;
             }
 
-            int visibleIndex = xOffset + pointIndex - pointStart;
+            int visibleIndex = pointIndex - _startIndex;
             float x = X(visibleIndex);
             float y = panel == 0
                 ? PriceY(value)
@@ -82,23 +79,20 @@ public sealed partial class SkiaChartRenderer
         SKPaint paint)
     {
         _histogramPath.Rewind();
-        int pointStart = Math.Max(0, series.Points.Length - _visibleCount);
-        int available = series.Points.Length - pointStart;
-        int xOffset = _visibleCount - available;
+        int pointStart = Math.Min(_startIndex, series.Points.Length);
+        int pointEnd = Math.Min(_startIndex + _visibleCount, series.Points.Length);
         float zero = panel == 0
             ? PriceY(0f)
             : MapY(0f, _panelMinimum[panel], _panelMaximum[panel], rect);
         zero = Math.Clamp(zero, rect.Top, rect.Bottom);
         float halfWidth = Math.Max(0.5f, _bodyWidth * 0.36f);
 
-        for (int pointIndex = pointStart;
-             pointIndex < series.Points.Length;
-             pointIndex++)
+        for (int pointIndex = pointStart; pointIndex < pointEnd; pointIndex++)
         {
             float value = series.Points[pointIndex].GetValue(valueIndex);
             if (!float.IsFinite(value)) continue;
 
-            int visibleIndex = xOffset + pointIndex - pointStart;
+            int visibleIndex = pointIndex - _startIndex;
             float x = X(visibleIndex);
             float y = panel == 0
                 ? PriceY(value)
