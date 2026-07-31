@@ -18,7 +18,9 @@ internal sealed class MainForm : Form
     private readonly ChartFrame _chartFrame = new();
     private readonly ChartLayoutOptions _layoutOptions = new();
     private readonly ChartRenderOptions _renderOptions = new(ShowText: true, ShowAxes: true);
+    private readonly ChartCursorController _cursor = new();
     private readonly SkiaChartRenderer _renderer = new();
+    private readonly ChartCrosshairRenderer _crosshairRenderer = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly ComboBox _symbols = new();
     private readonly Label _status = new();
@@ -70,6 +72,7 @@ internal sealed class MainForm : Form
             {
                 _selectedSymbol = symbol;
                 _lastVersion = -1;
+                _cursor.Clear();
                 if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
                     _viewport.Reset(snapshot.Candles.Length);
                 _chart.Invalidate();
@@ -88,6 +91,7 @@ internal sealed class MainForm : Form
         _chart.TabStop = true;
         _chart.PaintSurface += OnPaintSurface;
         _chart.MouseEnter += (_, _) => _chart.Focus();
+        _chart.MouseLeave += OnChartMouseLeave;
         _chart.MouseWheel += OnChartMouseWheel;
         _chart.MouseDown += OnChartMouseDown;
         _chart.MouseMove += OnChartMouseMove;
@@ -203,18 +207,16 @@ internal sealed class MainForm : Form
             return;
         }
 
-        _frameBuilder.Build(
-            snapshot,
-            window,
-            e.Info.Width,
-            e.Info.Height,
-            _layoutOptions,
-            _chartFrame);
+        BuildChartFrame(snapshot, window, e.Info.Width, e.Info.Height);
         _renderer.Render(
             e.Surface.Canvas,
             snapshot,
             _chartFrame,
             _renderOptions);
+        _crosshairRenderer.Render(
+            e.Surface.Canvas,
+            _chartFrame,
+            _cursor.Current);
     }
 
     private void OnChartMouseWheel(object? sender, MouseEventArgs e)
@@ -225,6 +227,7 @@ internal sealed class MainForm : Form
             0f,
             1f);
         _viewport.Zoom(e.Delta, snapshot.Candles.Length, anchor);
+        UpdateCursor(e.X, e.Y, snapshot);
         _chart.Invalidate();
     }
 
@@ -236,25 +239,33 @@ internal sealed class MainForm : Form
         _dragBarRemainder = 0d;
         _chart.Capture = true;
         _chart.Focus();
+        if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+            UpdateCursor(e.X, e.Y, snapshot);
     }
 
     private void OnChartMouseMove(object? sender, MouseEventArgs e)
     {
-        if (!_dragging || !TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
         ChartWindow window = _viewport.Resolve(snapshot.Candles.Length);
         if (window.IsEmpty) return;
 
-        int deltaPixels = e.X - _lastDragX;
-        _lastDragX = e.X;
-        double pixelsPerBar = Math.Max(
-            1d,
-            (double)Math.Max(1, _chart.ClientSize.Width) / window.Count);
-        _dragBarRemainder += deltaPixels / pixelsPerBar;
-        int deltaBars = (int)Math.Truncate(_dragBarRemainder);
-        if (deltaBars == 0) return;
+        if (_dragging)
+        {
+            int deltaPixels = e.X - _lastDragX;
+            _lastDragX = e.X;
+            double pixelsPerBar = Math.Max(
+                1d,
+                (double)Math.Max(1, _chart.ClientSize.Width) / window.Count);
+            _dragBarRemainder += deltaPixels / pixelsPerBar;
+            int deltaBars = (int)Math.Truncate(_dragBarRemainder);
+            if (deltaBars != 0)
+            {
+                _dragBarRemainder -= deltaBars;
+                _viewport.Pan(deltaBars, snapshot.Candles.Length);
+            }
+        }
 
-        _dragBarRemainder -= deltaBars;
-        _viewport.Pan(deltaBars, snapshot.Candles.Length);
+        UpdateCursor(e.X, e.Y, snapshot);
         _chart.Invalidate();
     }
 
@@ -266,10 +277,18 @@ internal sealed class MainForm : Form
         _chart.Capture = false;
     }
 
+    private void OnChartMouseLeave(object? sender, EventArgs e)
+    {
+        if (_dragging) return;
+        _cursor.Clear();
+        _chart.Invalidate();
+    }
+
     private void OnChartMouseDoubleClick(object? sender, MouseEventArgs e)
     {
         if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
         _viewport.FollowLatest(snapshot.Candles.Length);
+        UpdateCursor(e.X, e.Y, snapshot);
         _chart.Invalidate();
     }
 
@@ -306,8 +325,41 @@ internal sealed class MainForm : Form
                 return;
         }
 
+        _cursor.Clear();
         e.Handled = true;
         _chart.Invalidate();
+    }
+
+    private void UpdateCursor(int x, int y, SymbolSnapshot snapshot)
+    {
+        ChartWindow window = _viewport.Resolve(snapshot.Candles.Length);
+        if (window.IsEmpty)
+        {
+            _cursor.Clear();
+            return;
+        }
+
+        BuildChartFrame(
+            snapshot,
+            window,
+            Math.Max(1, _chart.ClientSize.Width),
+            Math.Max(1, _chart.ClientSize.Height));
+        _cursor.Update(x, y, snapshot, _chartFrame);
+    }
+
+    private void BuildChartFrame(
+        SymbolSnapshot snapshot,
+        ChartWindow window,
+        float width,
+        float height)
+    {
+        _frameBuilder.Build(
+            snapshot,
+            window,
+            width,
+            height,
+            _layoutOptions,
+            _chartFrame);
     }
 
     private bool TryGetSelectedSnapshot(out SymbolSnapshot? snapshot) =>
@@ -322,6 +374,7 @@ internal sealed class MainForm : Form
         catch (OperationCanceledException) { }
         _source.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _engine.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _crosshairRenderer.Dispose();
         _renderer.Dispose();
         _frameTimer.Dispose();
         _stop.Dispose();
