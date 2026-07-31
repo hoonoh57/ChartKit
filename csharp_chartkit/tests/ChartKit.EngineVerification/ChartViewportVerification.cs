@@ -20,6 +20,12 @@ internal static class ChartViewportVerification
             !viewport.IsFollowingLatest)
             throw new InvalidOperationException("Initial viewport future-space resolution failed.");
 
+        ChartWindow selectedBars = viewport.SetVisibleBars(60, totalBars);
+        if (selectedBars.Count != 60 || selectedBars.RightBlankBars != 12 ||
+            selectedBars.VisibleSlotCount != 72 || viewport.VisibleBars != 60)
+            throw new InvalidOperationException("Viewport explicit visible-bar selection failed.");
+        viewport.SetVisibleBars(160, totalBars, followLatest: true);
+
         ChartWindow filledGap = viewport.Pan(5, totalBars);
         if (filledGap.EndExclusive != totalBars || filledGap.RightBlankBars != 7 ||
             filledGap.Count != 165 || viewport.RightOffsetBars != 0)
