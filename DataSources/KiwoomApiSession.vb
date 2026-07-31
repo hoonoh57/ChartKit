@@ -8,6 +8,7 @@ Imports System.Net.Http
 Imports System.Text
 Imports System.Text.Json
 Imports System.Threading
+Imports System.Threading.Tasks
 Imports ChartKit.Core
 
 Namespace DataSources
@@ -170,7 +171,6 @@ Namespace DataSources
 
             Do
                 Dim accessToken As String = GetAccessToken()
-                WaitForRequestTurn()
 
                 Using request As New HttpRequestMessage(HttpMethod.Post, url)
                     request.Content = New StringContent(body, Encoding.UTF8, "application/json")
@@ -179,8 +179,7 @@ Namespace DataSources
                     request.Headers.TryAddWithoutValidation("cont-yn", If(contYn, "N"))
                     request.Headers.TryAddWithoutValidation("next-key", If(nextKey, ""))
 
-                    Using response As HttpResponseMessage =
-                        _http.SendAsync(request).GetAwaiter().GetResult()
+                    Using response As HttpResponseMessage = SendThrottled(request)
                         Dim json As String =
                             response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
 
@@ -222,7 +221,9 @@ Namespace DataSources
             Return _clock.UtcNow < (_tokenExpiresUtc - _options.TokenRefreshSkew)
         End Function
 
-        Private Sub WaitForRequestTurn()
+        Private Function SendThrottled(request As HttpRequestMessage) As HttpResponseMessage
+            Dim pendingResponse As Task(Of HttpResponseMessage)
+
             SyncLock _rateSync
                 Do
                     Dim nowTicks As Long = _clock.TickCount64
@@ -232,13 +233,17 @@ Namespace DataSources
                     Dim waitTicks As Long = readyAt - nowTicks
                     If waitTicks <= 0L Then Exit Do
 
-                    Dim waitMs As Integer = CInt(Math.Min(CLng(Integer.MaxValue), waitTicks))
+                    Dim waitMs As Integer =
+                        CInt(Math.Min(CLng(Integer.MaxValue), waitTicks))
                     _clock.Sleep(waitMs)
                 Loop
 
                 _lastCallTicks = _clock.TickCount64
+                pendingResponse = _http.SendAsync(request)
             End SyncLock
-        End Sub
+
+            Return pendingResponse.GetAwaiter().GetResult()
+        End Function
 
         Private Sub RegisterGlobalBackoff(milliseconds As Integer)
             If milliseconds <= 0 Then Return
