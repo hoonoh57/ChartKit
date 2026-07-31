@@ -1,3 +1,7 @@
+Option Strict On
+Option Explicit On
+Option Infer Off
+
 Imports System.Linq
 Imports System.Windows.Forms
 Imports SkiaSharp
@@ -39,6 +43,9 @@ Namespace Core
         Private _mainRect As SKRect
         Private _volumeRect As SKRect
         Private _panelRects As New List(Of SKRect)()
+        Private ReadOnly _layoutPanelIndexes As New List(Of Integer)()
+        Private ReadOnly _panelScaleIndexes As New List(Of Integer)()
+        Private ReadOnly _panelScales As New Dictionary(Of Integer, PanelScale)()
         Private _panelBaselines As New Dictionary(Of Integer, List(Of Single))()
         Private _panelZones As New Dictionary(Of Integer, PanelZoneState)()
         Private _shadeRules As New List(Of OverlayShadeRule)()
