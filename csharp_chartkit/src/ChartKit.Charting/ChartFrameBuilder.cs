@@ -119,10 +119,10 @@ public sealed class ChartFrameBuilder
             priceMaximum + priceMargin);
         frame.VolumeMaximum = volumeMaximum;
 
-        var minima = new float[ChartFrame.MaximumPanelIndex + 1];
-        var maxima = new float[ChartFrame.MaximumPanelIndex + 1];
-        Array.Fill(minima, float.MaxValue);
-        Array.Fill(maxima, float.MinValue);
+        Span<float> minima = stackalloc float[ChartFrame.MaximumPanelIndex + 1];
+        Span<float> maxima = stackalloc float[ChartFrame.MaximumPanelIndex + 1];
+        minima.Fill(float.MaxValue);
+        maxima.Fill(float.MinValue);
 
         foreach (IndicatorSeriesSnapshot series in snapshot.Indicators)
         {
