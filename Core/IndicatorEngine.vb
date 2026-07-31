@@ -197,7 +197,7 @@ Namespace Core
         Private Sub RebuildPublishedResults()
             _results.Clear()
 
-            For Each pair In _canonicalResults
+            For Each pair As KeyValuePair(Of String, IndicatorResultRingBuffer) In _canonicalResults
                 _results(pair.Key) = pair.Value
             Next
 
@@ -214,7 +214,7 @@ Namespace Core
                 registrations.Add(indicator)
             Next
 
-            For Each aliasPair In aliases
+            For Each aliasPair As KeyValuePair(Of String, List(Of RegisteredIndicator)) In aliases
                 If aliasPair.Value.Count <> 1 Then Continue For
                 If _results.ContainsKey(aliasPair.Key) Then Continue For
 
@@ -229,17 +229,17 @@ Namespace Core
         End Sub
 
         Private Shared Function ResultCapacity(candles As IReadOnlyList(Of CandleItem)) As Integer
-            Dim ring = TryCast(candles, CandleRingBuffer)
+            Dim ring As CandleRingBuffer = TryCast(candles, CandleRingBuffer)
             Return If(ring Is Nothing, Math.Max(DefaultResultCapacity, candles.Count), ring.Capacity)
         End Function
 
         Private Shared Function CandleFirstSequence(candles As IReadOnlyList(Of CandleItem)) As Long
-            Dim ring = TryCast(candles, CandleRingBuffer)
+            Dim ring As CandleRingBuffer = TryCast(candles, CandleRingBuffer)
             Return If(ring Is Nothing, 0L, ring.FirstSequence)
         End Function
 
         Private Shared Function CandleLastSequence(candles As IReadOnlyList(Of CandleItem)) As Long
-            Dim ring = TryCast(candles, CandleRingBuffer)
+            Dim ring As CandleRingBuffer = TryCast(candles, CandleRingBuffer)
             Return If(ring Is Nothing, candles.Count - 1L, ring.LastSequence)
         End Function
 
