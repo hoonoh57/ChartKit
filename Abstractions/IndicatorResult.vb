@@ -1,4 +1,8 @@
-﻿Namespace Abstractions
+Option Strict On
+Option Explicit On
+Option Infer Off
+
+Namespace Abstractions
     Public Enum SeriesKind
         Line
         Histogram
@@ -19,12 +23,27 @@
         Public Function KindOf(key As String) As SeriesKind
             Dim kind As SeriesKind
             If SeriesKinds IsNot Nothing AndAlso SeriesKinds.TryGetValue(key, kind) Then Return kind
-            Select Case key.ToUpperInvariant()
-                Case "HIST", "HISTOGRAM" : Return SeriesKind.Histogram
-                Case "UPPER", "LOWER", "BASELINE" : Return SeriesKind.Baseline
-                Case "DIRECTION", "MA", "ATR", "SLOPE" : Return SeriesKind.Meta
-                Case Else : Return SeriesKind.Line
-            End Select
+            If String.IsNullOrEmpty(key) Then Return SeriesKind.Line
+
+            If String.Equals(key, "Hist", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(key, "Histogram", StringComparison.OrdinalIgnoreCase) Then
+                Return SeriesKind.Histogram
+            End If
+
+            If String.Equals(key, "Upper", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(key, "Lower", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(key, "Baseline", StringComparison.OrdinalIgnoreCase) Then
+                Return SeriesKind.Baseline
+            End If
+
+            If String.Equals(key, "Direction", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(key, "MA", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(key, "ATR", StringComparison.OrdinalIgnoreCase) OrElse
+               String.Equals(key, "Slope", StringComparison.OrdinalIgnoreCase) Then
+                Return SeriesKind.Meta
+            End If
+
+            Return SeriesKind.Line
         End Function
 
         Public Function Val(key As String) As Single
@@ -34,7 +53,7 @@
 
         Public Overrides Function ToString() As String
             If Values Is Nothing OrElse Values.Count = 0 Then Return $"{Name}[{Index}] (empty)"
-            Dim items = String.Join(", ", Values.Select(Function(kv) $"{kv.Key}={kv.Value:F2}"))
+            Dim items As String = String.Join(", ", Values.Select(Function(kv) $"{kv.Key}={kv.Value:F2}"))
             Return $"{Name}[{Index}] {items}"
         End Function
     End Class
