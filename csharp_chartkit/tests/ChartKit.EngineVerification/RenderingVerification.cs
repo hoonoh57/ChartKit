@@ -26,6 +26,7 @@ internal static class RenderingVerification
             new SKImageInfo(1200, 800, SKColorType.Bgra8888, SKAlphaType.Premul));
         using var canvas = new SKCanvas(bitmap);
         using var renderer = new SkiaChartRenderer();
+        using var crosshairRenderer = new ChartCrosshairRenderer();
         var viewport = new ChartViewport(180, 20, 500);
         var frameBuilder = new ChartFrameBuilder();
         var frame = new ChartFrame();
@@ -49,6 +50,27 @@ internal static class RenderingVerification
         if (allocated > 32_768)
             throw new InvalidOperationException(
                 $"Rendering allocation exceeded bound: {allocated} bytes.");
+
+        var cursorController = new ChartCursorController();
+        ChartCursorSnapshot cursor = cursorController.Update(
+            frame.X(40),
+            frame.MainPanel.MidY,
+            snapshot,
+            frame);
+        crosshairRenderer.Render(canvas, frame, cursor);
+        canvas.Flush();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long crosshairBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 200; index++)
+            crosshairRenderer.Render(canvas, frame, cursor);
+        canvas.Flush();
+        long crosshairAllocated =
+            GC.GetAllocatedBytesForCurrentThread() - crosshairBefore;
+        if (crosshairAllocated > 32_768)
+            throw new InvalidOperationException(
+                $"Crosshair rendering allocation exceeded bound: {crosshairAllocated} bytes.");
 
         ChartWindow panned = viewport.Pan(40, snapshot.Candles.Length);
         if (panned.StartIndex >= window.StartIndex)
@@ -75,6 +97,7 @@ internal static class RenderingVerification
                 $"Rendered image contained too few chart pixels: {changedSamples}.");
 
         Console.WriteLine($"render_allocated_bytes={allocated}");
+        Console.WriteLine($"crosshair_allocated_bytes={crosshairAllocated}");
         Console.WriteLine($"render_changed_samples={changedSamples}");
         Console.WriteLine("csharp_rendering_verification=PASS");
     }
