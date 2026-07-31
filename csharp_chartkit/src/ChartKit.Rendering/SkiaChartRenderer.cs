@@ -101,6 +101,18 @@ public sealed partial class SkiaChartRenderer : IDisposable
             _gridPath.LineTo(frame.MainPanel.Right, y);
         }
 
+        for (int panel = 1; panel <= ChartFrame.MaximumPanelIndex; panel++)
+        {
+            if (!frame.PanelVisible[panel]) continue;
+            ChartRectF rect = frame.PanelRects[panel];
+            for (int index = 0; index < frame.PanelTickCounts[panel]; index++)
+            {
+                float y = frame.GetPanelTick(panel, index).Position;
+                _gridPath.MoveTo(rect.Left, y);
+                _gridPath.LineTo(rect.Right, y);
+            }
+        }
+
         float chartBottom = frame.TimeAxis.Top;
         for (int index = 0; index < frame.TimeTickCount; index++)
         {
@@ -190,6 +202,21 @@ public sealed partial class SkiaChartRenderer : IDisposable
                 _textPaint);
         }
 
+        for (int panel = 1; panel <= ChartFrame.MaximumPanelIndex; panel++)
+        {
+            if (!frame.PanelVisible[panel]) continue;
+            ChartRectF rect = frame.PanelRects[panel];
+            for (int index = 0; index < frame.PanelTickCounts[panel]; index++)
+            {
+                NumericAxisTick tick = frame.GetPanelTick(panel, index);
+                canvas.DrawText(
+                    FormatPanelValue(tick.Value),
+                    rect.Right + 6f,
+                    tick.Position + 4f,
+                    _textPaint);
+            }
+        }
+
         for (int index = 0; index < frame.TimeTickCount; index++)
         {
             TimeAxisTick tick = frame.TimeTicks[index];
@@ -237,6 +264,15 @@ public sealed partial class SkiaChartRenderer : IDisposable
     private static string FormatPrice(float value)
     {
         float absolute = Math.Abs(value);
+        string format = absolute >= 100f ? "N0" :
+                        absolute >= 1f ? "N2" : "N4";
+        return value.ToString(format, CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatPanelValue(float value)
+    {
+        float absolute = Math.Abs(value);
+        if (absolute < 0.00005f) return "0";
         string format = absolute >= 100f ? "N0" :
                         absolute >= 1f ? "N2" : "N4";
         return value.ToString(format, CultureInfo.InvariantCulture);
