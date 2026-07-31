@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - improve/chart-engine-hardening
   push:
     branches:
       - improve/chart-engine-hardening
