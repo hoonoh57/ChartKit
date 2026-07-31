@@ -2,6 +2,8 @@ Option Strict On
 Option Explicit On
 Option Infer Off
 
+Imports System.Linq
+
 Namespace Abstractions
     Public Enum SeriesKind
         Line
