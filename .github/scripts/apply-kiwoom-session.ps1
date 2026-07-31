@@ -15,48 +15,54 @@ function Write-Utf8BomCrLf([string]$path, [string]$content) {
     [System.IO.File]::WriteAllText($path, $normalized, $encoding)
 }
 
-$session = Read-Normalized $sessionPath
-$oldChecked = '            Return checked(baseDelay * (attempt + 1))'
-$newChecked = @'
-            Dim delayValue As Long = CLng(baseDelay) * CLng(attempt + 1)
-            Return CInt(Math.Min(CLng(Integer.MaxValue), delayValue))
-'@.TrimEnd()
-if (-not $session.Contains($oldChecked)) {
-    throw 'KiwoomApiSession checked 표현을 찾지 못했습니다.'
+function Replace-Required([string]$content, [string]$oldValue, [string]$newValue, [string]$description) {
+    if (-not $content.Contains($oldValue)) {
+        throw "필수 패턴을 찾지 못했습니다: $description"
+    }
+    return $content.Replace($oldValue, $newValue)
 }
-$session = $session.Replace($oldChecked, $newChecked)
+
+$session = Read-Normalized $sessionPath
+$session = Replace-Required $session `
+    '            Return checked(baseDelay * (attempt + 1))' `
+    "            Dim delayValue As Long = CLng(baseDelay) * CLng(attempt + 1)`n            Return CInt(Math.Min(CLng(Integer.MaxValue), delayValue))" `
+    'KiwoomApiSession checked 표현'
 Write-Utf8BomCrLf $sessionPath $session
 
 $content = Read-Normalized $sourcePath
+$content = Replace-Required $content `
+    '        Private Shared ReadOnly _http As New HttpClient()' `
+    '        Private ReadOnly _apiSession As KiwoomApiSession' `
+    '공용 HttpClient 필드'
+$content = Replace-Required $content `
+    "        Private _token As String = Nothing`n" `
+    '' `
+    '인스턴스 token 필드'
+$content = Replace-Required $content `
+    "        Private _lastCallTicks As Long = 0`n" `
+    '' `
+    '인스턴스 throttle 필드'
+$content = Replace-Required $content `
+    "        Private Const RealMinIntervalMs As Integer = 220`n" `
+    '' `
+    '실서버 throttle 상수'
+$content = Replace-Required $content `
+    "        Private Const MockMinIntervalMs As Integer = 1100`n" `
+    '' `
+    '모의서버 throttle 상수'
+$content = Replace-Required $content `
+    "        Private Const MaxRateLimitRetries As Integer = 4`n" `
+    '' `
+    '인스턴스 retry 상수'
 
-$oldFields = @'
-        Private Shared ReadOnly _http As New HttpClient()
-        Private ReadOnly _sync As New Object()
-        Private _token As String = Nothing
-        Private _lastCallTicks As Long = 0
-        Private _lastTicCount As Integer = 0
-'@.TrimEnd()
-$newFields = @'
-        Private ReadOnly _sync As New Object()
-        Private ReadOnly _apiSession As KiwoomApiSession
-        Private _lastTicCount As Integer = 0
-'@.TrimEnd()
-if (-not $content.Contains($oldFields)) {
-    throw 'KiwoomRestSource 기존 인증 필드 블록을 찾지 못했습니다.'
+$secondEvent = '        Public Event CandleUpdated As EventHandler(Of CandleUpdatedEventArgs) Implements ICandleDataSource.CandleUpdated'
+$eventIndex = $content.IndexOf($secondEvent, [System.StringComparison]::Ordinal)
+if ($eventIndex -lt 0) {
+    throw 'CandleUpdated 이벤트 선언을 찾지 못했습니다.'
 }
-$content = $content.Replace($oldFields, $newFields)
+$insertAt = $eventIndex + $secondEvent.Length
+$constructors = @'
 
-$content = $content.Replace("        Private Const RealMinIntervalMs As Integer = 220`n", '')
-$content = $content.Replace("        Private Const MockMinIntervalMs As Integer = 1100`n", '')
-$content = $content.Replace("        Private Const MaxRateLimitRetries As Integer = 4`n", '')
-
-$eventMarker = @'
-        Public Event CandleAppended As EventHandler(Of CandleAppendedEventArgs) Implements ICandleDataSource.CandleAppended
-        Public Event CandleUpdated As EventHandler(Of CandleUpdatedEventArgs) Implements ICandleDataSource.CandleUpdated
-'@.TrimEnd()
-$eventReplacement = @'
-        Public Event CandleAppended As EventHandler(Of CandleAppendedEventArgs) Implements ICandleDataSource.CandleAppended
-        Public Event CandleUpdated As EventHandler(Of CandleUpdatedEventArgs) Implements ICandleDataSource.CandleUpdated
 
         Public Sub New()
             Me.New(KiwoomApiSessionProvider.GetDefault())
@@ -66,11 +72,8 @@ $eventReplacement = @'
             If apiSession Is Nothing Then Throw New ArgumentNullException(NameOf(apiSession))
             _apiSession = apiSession
         End Sub
-'@.TrimEnd()
-if (-not $content.Contains($eventMarker)) {
-    throw 'KiwoomRestSource 이벤트 선언 블록을 찾지 못했습니다.'
-}
-$content = $content.Replace($eventMarker, $eventReplacement)
+'@
+$content = $content.Substring(0, $insertAt) + $constructors + $content.Substring($insertAt)
 
 $authStart = $content.IndexOf("        '' ── 토큰 발급", [System.StringComparison]::Ordinal)
 $continuationStart = $content.IndexOf("        '' 연속조회 안전 상한", $authStart, [System.StringComparison]::Ordinal)
@@ -99,57 +102,25 @@ $newCallApi = @'
 '@
 $content = $content.Substring(0, $authStart) + $newCallApi + $content.Substring($continuationStart)
 
-$startRealtimeOld = @'
-            EnsureToken()
-            _realtimeSymbol = If(String.IsNullOrWhiteSpace(req.Symbol), EnvConfig.DefaultSymbol, req.Symbol.Trim())
-'@.TrimEnd()
-$startRealtimeNew = @'
-            Dim ignoredAccessToken As String = _apiSession.GetAccessToken()
-            _realtimeSymbol = If(String.IsNullOrWhiteSpace(req.Symbol), EnvConfig.DefaultSymbol, req.Symbol.Trim())
-'@.TrimEnd()
-if (-not $content.Contains($startRealtimeOld)) {
-    throw 'StartRealtime의 EnsureToken 호출을 찾지 못했습니다.'
-}
-$content = $content.Replace($startRealtimeOld, $startRealtimeNew)
+$content = Replace-Required $content `
+    "            EnsureToken()`n" `
+    "            Dim ignoredAccessToken As String = _apiSession.GetAccessToken()`n" `
+    'StartRealtime EnsureToken 호출'
 
-$sessionStartOld = @'
-        Private Async Function RunRealtimeSessionAsync(cancel As CancellationToken) As Task
-            Dim ws As New ClientWebSocket()
-'@.TrimEnd()
-$sessionStartNew = @'
-        Private Async Function RunRealtimeSessionAsync(cancel As CancellationToken) As Task
-            Dim accessToken As String = _apiSession.GetAccessToken()
-            Dim ws As New ClientWebSocket()
-'@.TrimEnd()
-if (-not $content.Contains($sessionStartOld)) {
-    throw 'RunRealtimeSessionAsync 시작 블록을 찾지 못했습니다.'
-}
-$content = $content.Replace($sessionStartOld, $sessionStartNew)
+$content = Replace-Required $content `
+    "        Private Async Function RunRealtimeSessionAsync(cancel As CancellationToken) As Task`n            Dim ws As New ClientWebSocket()" `
+    "        Private Async Function RunRealtimeSessionAsync(cancel As CancellationToken) As Task`n            Dim accessToken As String = _apiSession.GetAccessToken()`n            Dim ws As New ClientWebSocket()" `
+    'RunRealtimeSessionAsync 시작 블록'
 
-$loginOld = '{"trnm", "LOGIN"}, {"token", _token}}, cancel)'
-$loginNew = '{"trnm", "LOGIN"}, {"token", accessToken}}, cancel)'
-if (-not $content.Contains($loginOld)) {
-    throw 'WebSocket LOGIN token 참조를 찾지 못했습니다.'
-}
-$content = $content.Replace($loginOld, $loginNew)
+$content = Replace-Required $content `
+    '{"trnm", "LOGIN"}, {"token", _token}}, cancel)' `
+    '{"trnm", "LOGIN"}, {"token", accessToken}}, cancel)' `
+    'WebSocket LOGIN token 참조'
 
-$loginFailureOld = @'
-                            If resultCode <> 0 Then
-                                Throw New InvalidOperationException(
-                                    "키움 WebSocket 로그인 실패: " & JsonString(root, "return_msg"))
-                            End If
-'@.TrimEnd()
-$loginFailureNew = @'
-                            If resultCode <> 0 Then
-                                _apiSession.InvalidateToken(accessToken)
-                                Throw New InvalidOperationException(
-                                    "키움 WebSocket 로그인 실패: " & JsonString(root, "return_msg"))
-                            End If
-'@.TrimEnd()
-if (-not $content.Contains($loginFailureOld)) {
-    throw 'WebSocket LOGIN 실패 블록을 찾지 못했습니다.'
-}
-$content = $content.Replace($loginFailureOld, $loginFailureNew)
+$content = Replace-Required $content `
+    "                            If resultCode <> 0 Then`n                                Throw New InvalidOperationException(`n                                    ""키움 WebSocket 로그인 실패: "" & JsonString(root, ""return_msg""))`n                            End If" `
+    "                            If resultCode <> 0 Then`n                                _apiSession.InvalidateToken(accessToken)`n                                Throw New InvalidOperationException(`n                                    ""키움 WebSocket 로그인 실패: "" & JsonString(root, ""return_msg""))`n                            End If" `
+    'WebSocket LOGIN 실패 블록'
 
 if ($content.Contains('_token') -or $content.Contains('EnsureToken()') -or $content.Contains('Private Sub Throttle()')) {
     throw 'KiwoomRestSource에 이전 인증 상태 참조가 남아 있습니다.'
