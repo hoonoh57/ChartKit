@@ -95,7 +95,7 @@ Namespace Core
 
         Private Sub NormalizeResults(results As IEnumerable(Of IndicatorResult))
             If results Is Nothing Then Return
-            For Each result In results
+            For Each result As IndicatorResult In results
                 NormalizeResult(result)
             Next
         End Sub
