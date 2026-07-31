@@ -29,11 +29,12 @@ public sealed class ChartCrosshairRenderer : IDisposable
     };
     private readonly SKFont _font = new(SKTypeface.Default, 13f);
     private readonly SKPath _path = new();
-    private SKTextBlob? _priceBlob;
+    private SKTextBlob? _axisBlob;
     private SKTextBlob? _timeBlob;
     private SKTextBlob? _ohlcvBlob;
     private int _lastCandleIndex = -1;
-    private int _lastPriceBits;
+    private int _lastPanelIndex = int.MinValue;
+    private int _lastAxisBits;
     private int _disposed;
 
     public void Render(
@@ -44,17 +45,17 @@ public sealed class ChartCrosshairRenderer : IDisposable
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(frame);
-        if (!cursor.IsVisible || frame.Window.IsEmpty) return;
+        if (!cursor.IsVisible || frame.Window.IsEmpty || cursor.ActivePanel.IsEmpty) return;
 
         UpdateLabels(cursor);
         _path.Rewind();
         _path.MoveTo(cursor.X, frame.MainPanel.Top);
         _path.LineTo(cursor.X, frame.TimeAxis.Top);
-        _path.MoveTo(frame.MainPanel.Left, cursor.Y);
-        _path.LineTo(frame.MainPanel.Right, cursor.Y);
+        _path.MoveTo(cursor.ActivePanel.Left, cursor.Y);
+        _path.LineTo(cursor.ActivePanel.Right, cursor.Y);
         canvas.DrawPath(_path, _linePaint);
 
-        DrawPriceLabel(canvas, frame, cursor.Y);
+        DrawAxisLabel(canvas, frame, cursor);
         DrawTimeLabel(canvas, frame, cursor.X);
         canvas.DrawText(
             _ohlcvBlob!,
@@ -65,12 +66,18 @@ public sealed class ChartCrosshairRenderer : IDisposable
 
     private void UpdateLabels(ChartCursorSnapshot cursor)
     {
-        int priceBits = BitConverter.SingleToInt32Bits(cursor.Price);
-        if (_lastCandleIndex == cursor.CandleIndex && _lastPriceBits == priceBits) return;
+        int axisBits = BitConverter.SingleToInt32Bits(cursor.AxisValue);
+        if (_lastCandleIndex == cursor.CandleIndex &&
+            _lastPanelIndex == cursor.PanelIndex &&
+            _lastAxisBits == axisBits)
+            return;
 
         _lastCandleIndex = cursor.CandleIndex;
-        _lastPriceBits = priceBits;
-        string priceLabel = FormatNumber(cursor.Price);
+        _lastPanelIndex = cursor.PanelIndex;
+        _lastAxisBits = axisBits;
+        string axisLabel = cursor.PanelIndex == ChartCursorSnapshot.VolumePanelIndex
+            ? cursor.AxisValue.ToString("N0", CultureInfo.InvariantCulture)
+            : FormatNumber(cursor.AxisValue);
         string timeLabel = cursor.Candle.OpenTime.ToString(
             "yyyy-MM-dd HH:mm:ss",
             CultureInfo.InvariantCulture);
@@ -80,33 +87,36 @@ public sealed class ChartCrosshairRenderer : IDisposable
             $"L {FormatNumber(candle.Low)}  C {FormatNumber(candle.Close)}  " +
             $"V {candle.Volume.ToString("N0", CultureInfo.InvariantCulture)}";
 
-        _priceBlob?.Dispose();
+        _axisBlob?.Dispose();
         _timeBlob?.Dispose();
         _ohlcvBlob?.Dispose();
-        _priceBlob = SKTextBlob.Create(priceLabel, _font) ??
-                     throw new InvalidOperationException("Price label shaping failed.");
+        _axisBlob = SKTextBlob.Create(axisLabel, _font) ??
+                    throw new InvalidOperationException("Axis label shaping failed.");
         _timeBlob = SKTextBlob.Create(timeLabel, _font) ??
                     throw new InvalidOperationException("Time label shaping failed.");
         _ohlcvBlob = SKTextBlob.Create(ohlcvLabel, _font) ??
                      throw new InvalidOperationException("OHLCV label shaping failed.");
     }
 
-    private void DrawPriceLabel(SKCanvas canvas, ChartFrame frame, float y)
+    private void DrawAxisLabel(
+        SKCanvas canvas,
+        ChartFrame frame,
+        ChartCursorSnapshot cursor)
     {
-        float width = _priceBlob!.Bounds.Width + 10f;
+        float width = _axisBlob!.Bounds.Width + 10f;
         float height = 20f;
         float top = Math.Clamp(
-            y - height * 0.5f,
-            frame.MainPanel.Top,
-            frame.MainPanel.Bottom - height);
+            cursor.Y - height * 0.5f,
+            cursor.ActivePanel.Top,
+            Math.Max(cursor.ActivePanel.Top, cursor.ActivePanel.Bottom - height));
         var rect = new SKRect(
-            frame.MainPanel.Right + 2f,
+            cursor.ActivePanel.Right + 2f,
             top,
-            Math.Min(frame.Bounds.Right, frame.MainPanel.Right + 2f + width),
+            Math.Min(frame.Bounds.Right, cursor.ActivePanel.Right + 2f + width),
             top + height);
         canvas.DrawRect(rect, _labelBackgroundPaint);
         canvas.DrawText(
-            _priceBlob,
+            _axisBlob,
             rect.Left + 5f,
             rect.Top + 15f,
             _labelTextPaint);
@@ -144,7 +154,7 @@ public sealed class ChartCrosshairRenderer : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        _priceBlob?.Dispose();
+        _axisBlob?.Dispose();
         _timeBlob?.Dispose();
         _ohlcvBlob?.Dispose();
         _font.Dispose();
