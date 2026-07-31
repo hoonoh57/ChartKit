@@ -141,6 +141,20 @@ public sealed record HistoryRequest(
     int Count,
     DateTime? To = null);
 
+public sealed record InstrumentMetadata(
+    string Symbol,
+    string DisplayName,
+    string Market,
+    string Source,
+    DateTimeOffset RetrievedAtUtc);
+
+public interface IInstrumentMetadataSource
+{
+    Task<InstrumentMetadata> GetInstrumentMetadataAsync(
+        string symbol,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IMarketDataSource : IAsyncDisposable
 {
     string Name { get; }
