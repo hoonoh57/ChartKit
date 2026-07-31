@@ -141,9 +141,8 @@ Namespace Verification
 
             Dim registered As IIndicator = engine.GetAll()(0)
             Dim oldId As String = registered.Name
-            Dim changed As New Dictionary(Of String, Object)(registered.Parameters) From {
-                {"Phase", -50}
-            }
+            Dim changed As New Dictionary(Of String, Object)(registered.Parameters)
+            changed("Phase") = -50
             registered.Parameters = changed
             Dim newId As String = registered.Name
 
