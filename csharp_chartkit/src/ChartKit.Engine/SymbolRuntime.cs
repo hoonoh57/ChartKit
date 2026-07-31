@@ -32,7 +32,8 @@ internal sealed class SymbolRuntime
             .Select(indicator => new IndicatorRuntime(indicator, candleCapacity))
             .ToArray();
         _snapshotBars = snapshotBars;
-        _snapshotIntervalTicks = Math.Max(1L, (long)(Stopwatch.Frequency * snapshotInterval.TotalSeconds));
+        _snapshotIntervalTicks = Math.Max(1L,
+            (long)(Stopwatch.Frequency * snapshotInterval.TotalSeconds));
     }
 
     public string Symbol { get; }
@@ -41,13 +42,16 @@ internal sealed class SymbolRuntime
     {
         _candles.Clear();
         int start = Math.Max(0, candles.Count - _candles.Capacity);
-        for (int index = start; index < candles.Count; index++) _candles.Add(candles[index]);
+        for (int index = start; index < candles.Count; index++)
+            _candles.Add(candles[index]);
 
         foreach (IndicatorRuntime runtime in _indicators)
         {
+            runtime.Points.Clear();
             runtime.Indicator.Reset();
             IReadOnlyList<IndicatorPoint> points = runtime.Indicator.Calculate(_candles);
-            foreach (IndicatorPoint point in points) runtime.Points.AddOrReplace(point);
+            foreach (IndicatorPoint point in points)
+                runtime.Points.AddOrReplace(point);
         }
         _version++;
     }
@@ -55,7 +59,8 @@ internal sealed class SymbolRuntime
     public void Apply(CandleEvent value)
     {
         if (_candles.Count > 0 &&
-            (value.Kind == MarketEventKind.Update || _candles.LastSequence == value.Candle.Sequence))
+            (value.Kind == MarketEventKind.Update ||
+             _candles.LastSequence == value.Candle.Sequence))
             _candles.ReplaceLast(value.Candle);
         else
             _candles.Add(value.Candle);
@@ -80,10 +85,16 @@ internal sealed class SymbolRuntime
         for (int index = 0; index < _indicators.Length; index++)
         {
             IndicatorRuntime runtime = _indicators[index];
-            indicators[index] = new(runtime.Indicator.Descriptor,
+            indicators[index] = new(
+                runtime.Indicator.Descriptor,
                 Tail(runtime.Points.Snapshot(), _snapshotBars));
         }
-        snapshot = new(Symbol, candles, indicators, _version, DateTimeOffset.UtcNow);
+        snapshot = new(
+            Symbol,
+            candles,
+            indicators,
+            _version,
+            DateTimeOffset.UtcNow);
         return true;
     }
 
