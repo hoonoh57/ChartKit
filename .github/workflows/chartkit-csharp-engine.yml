@@ -59,7 +59,7 @@ jobs:
             '--replay',
             '--symbols', 'S001,S002',
             '--timeframe', '1m',
-            '--count', '120'
+            '--count', '1000'
           )
           $process = Start-Process `
             -FilePath 'dotnet' `
