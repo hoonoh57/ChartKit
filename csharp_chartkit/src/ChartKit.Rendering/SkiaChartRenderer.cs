@@ -1,4 +1,5 @@
 using System.Globalization;
+using ChartKit.CSharp.Charting;
 using ChartKit.CSharp.Contracts;
 using SkiaSharp;
 
@@ -71,6 +72,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
         SKCanvas canvas,
         SKRect bounds,
         SymbolSnapshot snapshot,
+        ChartWindow window,
         ChartRenderOptions? options = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
@@ -82,13 +84,19 @@ public sealed partial class SkiaChartRenderer : IDisposable
         canvas.Save();
         canvas.ClipRect(bounds);
         canvas.DrawRect(bounds, _backgroundPaint);
-        if (snapshot.Candles.Length == 0)
+        if (snapshot.Candles.Length == 0 || window.IsEmpty)
         {
             canvas.Restore();
             return;
         }
+        if (window.StartIndex < 0 || window.Count <= 0 ||
+            window.EndExclusive > snapshot.Candles.Length)
+        {
+            canvas.Restore();
+            throw new ArgumentOutOfRangeException(nameof(window));
+        }
 
-        PrepareLayout(bounds, snapshot, settings);
+        PrepareLayout(bounds, snapshot, window, settings);
         DrawGrid(canvas);
         DrawCandles(canvas, snapshot);
         DrawIndicatorSeries(canvas, snapshot);
@@ -99,6 +107,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
     private void PrepareLayout(
         SKRect bounds,
         SymbolSnapshot snapshot,
+        ChartWindow window,
         ChartRenderOptions options)
     {
         Array.Clear(_panelVisible);
@@ -135,8 +144,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
             panelTop += panelHeight;
         }
 
-        _visibleCount = Math.Min(options.VisibleBars, snapshot.Candles.Length);
-        _startIndex = snapshot.Candles.Length - _visibleCount;
+        _startIndex = window.StartIndex;
+        _visibleCount = window.Count;
         _step = _mainRect.Width / Math.Max(1, _visibleCount);
         _bodyWidth = Math.Max(1f, _step * 0.72f);
         CalculateRanges(snapshot);
@@ -147,7 +156,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
         _priceMinimum = float.MaxValue;
         _priceMaximum = float.MinValue;
         _volumeMaximum = 1;
-        for (int index = _startIndex; index < snapshot.Candles.Length; index++)
+        int candleEnd = _startIndex + _visibleCount;
+        for (int index = _startIndex; index < candleEnd; index++)
         {
             Candle candle = snapshot.Candles[index];
             _priceMinimum = Math.Min(_priceMinimum, candle.Low);
@@ -173,8 +183,9 @@ public sealed partial class SkiaChartRenderer : IDisposable
         {
             int panel = series.Descriptor.PanelIndex;
             if (panel <= 0 || panel > MaximumPanelIndex) continue;
-            int pointStart = Math.Max(0, series.Points.Length - _visibleCount);
-            for (int pointIndex = pointStart; pointIndex < series.Points.Length; pointIndex++)
+            int pointStart = Math.Min(_startIndex, series.Points.Length);
+            int pointEnd = Math.Min(candleEnd, series.Points.Length);
+            for (int pointIndex = pointStart; pointIndex < pointEnd; pointIndex++)
             {
                 IndicatorPoint point = series.Points[pointIndex];
                 for (int valueIndex = 0; valueIndex < series.Descriptor.ValueCount; valueIndex++)
@@ -282,7 +293,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
 
     private void DrawHeader(SKCanvas canvas, SKRect bounds, SymbolSnapshot snapshot)
     {
-        Candle last = snapshot.Candles[^1];
+        Candle last = snapshot.Candles[_startIndex + _visibleCount - 1];
         canvas.DrawText(snapshot.Symbol, bounds.Left + 10f, bounds.Top + 17f, _textPaint);
         string price = last.Close.ToString("N2", CultureInfo.InvariantCulture);
         canvas.DrawText(price, bounds.Right - 70f, bounds.Top + 17f, _textPaint);
