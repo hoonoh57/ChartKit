@@ -49,11 +49,18 @@ Namespace UI
         Private ReadOnly _totalCount As New NumericUpDown()
         Private ReadOnly _datePicker As New DateTimePicker()
         Private ReadOnly _queryButton As New Button()
+        Private ReadOnly _moreButton As New Button()
         Private ReadOnly _dateButton As New Button()
+        Private ReadOnly _backtestButton As New Button()
         Private ReadOnly _status As New Label()
 
         Public Event QueryRequested As EventHandler(Of ChartQueryEventArgs)
+        Public Event MoreRequested As EventHandler(Of ChartQueryEventArgs)
         Public Event DateRequested As EventHandler(Of ChartDateEventArgs)
+        Public Event VisibleCountChanged As EventHandler(Of EventArgs)
+        Public Event BacktestRequested As EventHandler(Of EventArgs)
+        Private _updatingValues As Boolean
+        Private _moreBatchCount As Integer = 200
 
         Public Sub New()
             Dock = DockStyle.Top
@@ -87,8 +94,9 @@ Namespace UI
                 Opt("월봉", CandleInterval.Month)})
             _timeframe.SelectedIndex = 9
 
-            ConfigureNumber(_visibleCount, 10, 1000, 100, 58)
-            ConfigureNumber(_totalCount, 10, 1000, 200, 62)
+            ConfigureNumber(_visibleCount, 1, 100000, 100, 72)
+            ConfigureNumber(_totalCount, 10, 100000, 200, 76)
+            AddHandler _visibleCount.ValueChanged, AddressOf OnVisibleCountValueChanged
 
             _datePicker.Format = DateTimePickerFormat.Custom
             _datePicker.CustomFormat = "yyyy-MM-dd"
@@ -96,9 +104,14 @@ Namespace UI
             ConfigureDarkInput(_datePicker)
 
             ConfigureButton(_queryButton, "조회", 52)
+            ConfigureButton(_moreButton, "추가조회", 68)
             ConfigureButton(_dateButton, "이동", 48)
+            ConfigureButton(_backtestButton, "백테스트", 70)
             AddHandler _queryButton.Click, AddressOf OnQueryClick
+            AddHandler _moreButton.Click, AddressOf OnMoreClick
             AddHandler _dateButton.Click, AddressOf OnDateClick
+            AddHandler _backtestButton.Click,
+                Sub(sender As Object, e As EventArgs) RaiseEvent BacktestRequested(Me, EventArgs.Empty)
 
             _status.AutoSize = True
             _status.ForeColor = Color.White
@@ -110,26 +123,66 @@ Namespace UI
             AddField(flow, "화면표시", _visibleCount)
             AddField(flow, "총캔들", _totalCount)
             flow.Controls.Add(_queryButton)
+            flow.Controls.Add(_moreButton)
             AddField(flow, "일자", _datePicker)
             flow.Controls.Add(_dateButton)
+            flow.Controls.Add(_backtestButton)
             flow.Controls.Add(_status)
         End Sub
 
         Public Sub Initialize(symbol As String, symbolName As String, interval As CandleInterval,
                               totalCount As Integer, visibleCount As Integer)
+            _updatingValues = True
             _symbol.Text = symbol
             _symbolName.Text = symbolName
             _totalCount.Value = Math.Max(_totalCount.Minimum, Math.Min(_totalCount.Maximum, totalCount))
+            _moreBatchCount = CInt(_totalCount.Value)
             _visibleCount.Value = Math.Max(_visibleCount.Minimum, Math.Min(_visibleCount.Maximum, visibleCount))
             For i = 0 To _timeframe.Items.Count - 1
                 Dim item = DirectCast(_timeframe.Items(i), TimeframeOption)
                 If item.Interval = interval Then _timeframe.SelectedIndex = i : Exit For
             Next
+            _updatingValues = False
+        End Sub
+
+        Public ReadOnly Property VisibleCount As Integer
+            Get
+                Return CInt(_visibleCount.Value)
+            End Get
+        End Property
+
+        Public Sub SetVisibleCount(value As Integer)
+            Dim bounded = Math.Max(CInt(_visibleCount.Minimum), Math.Min(CInt(_visibleCount.Maximum), value))
+            If CInt(_visibleCount.Value) = bounded Then Return
+            _updatingValues = True
+            Try
+                _visibleCount.Value = bounded
+            Finally
+                _updatingValues = False
+            End Try
+        End Sub
+
+        Public Sub SetTotalCount(value As Integer)
+            Dim bounded = Math.Max(CInt(_totalCount.Minimum), Math.Min(CInt(_totalCount.Maximum), value))
+            If CInt(_totalCount.Value) = bounded Then Return
+            _updatingValues = True
+            Try
+                _totalCount.Value = bounded
+            Finally
+                _updatingValues = False
+            End Try
+        End Sub
+
+        Private Sub OnVisibleCountValueChanged(sender As Object, e As EventArgs)
+            If _updatingValues Then Return
+            RaiseEvent VisibleCountChanged(Me, EventArgs.Empty)
         End Sub
 
         Public Sub SetBusy(isBusy As Boolean)
             _queryButton.Enabled = Not isBusy
+            _moreButton.Enabled = Not isBusy
             _dateButton.Enabled = Not isBusy
+            _backtestButton.Enabled = Not isBusy
             _queryButton.Text = If(isBusy, "조회중", "조회")
         End Sub
 
@@ -166,9 +219,19 @@ Namespace UI
             End If
             Dim optionItem = TryCast(_timeframe.SelectedItem, TimeframeOption)
             If optionItem Is Nothing Then Return
+            _moreBatchCount = CInt(_totalCount.Value)
             RaiseEvent QueryRequested(Me, New ChartQueryEventArgs(
                 code, _symbolName.Text.Trim(), optionItem.Interval,
                 CInt(_totalCount.Value), CInt(_visibleCount.Value)))
+        End Sub
+
+        Private Sub OnMoreClick(sender As Object, e As EventArgs)
+            Dim code = _symbol.Text.Trim()
+            Dim optionItem = TryCast(_timeframe.SelectedItem, TimeframeOption)
+            If code.Length = 0 OrElse optionItem Is Nothing Then Return
+            RaiseEvent MoreRequested(Me, New ChartQueryEventArgs(
+                code, _symbolName.Text.Trim(), optionItem.Interval,
+                _moreBatchCount, CInt(_visibleCount.Value)))
         End Sub
 
         Private Sub OnDateClick(sender As Object, e As EventArgs)

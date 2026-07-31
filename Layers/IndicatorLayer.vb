@@ -27,10 +27,18 @@ Namespace Layers
 
         Private ReadOnly _paints As New Dictionary(Of String, SKPaint)
         Private ReadOnly _path As New SKPath()
+        Private _paintThemeVersion As Integer = -1
 
         Public Sub Draw(canvas As SKCanvas, ctx As ChartContext) Implements IChartLayer.Draw
             If ctx.Engine Is Nothing Then Return
             If ctx.Candles Is Nothing OrElse ctx.Candles.Count = 0 Then Return
+            If _paintThemeVersion <> ctx.Theme.Version Then
+                For Each paint In _paints.Values
+                    paint.Dispose()
+                Next
+                _paints.Clear()
+                _paintThemeVersion = ctx.Theme.Version
+            End If
 
             Dim colorIdx = 0
             Dim s = Math.Max(0, ctx.StartIndex)
@@ -38,7 +46,7 @@ Namespace Layers
 
             For Each ind In ctx.Engine.GetAll()
                 If ind.PanelIndex > 0 Then Continue For
-                Dim results As List(Of IndicatorResult) = Nothing
+                Dim results As ChartKit.Models.IndicatorResultRingBuffer = Nothing
                 If Not ctx.Engine.Results.TryGetValue(ind.Name, results) Then Continue For
                 If results Is Nothing OrElse results.Count = 0 Then Continue For
 
@@ -102,7 +110,7 @@ Namespace Layers
         '' Value 본선을 연속으로 그리며, 각 봉의 방향(Up non-NaN=상승, Down non-NaN=하락)에 맞춰
         '' 세그먼트 색만 전환. Value 는 NaN/0 이 없으므로 끊기지 않는다.
         Private Sub DrawDirectionalValue(canvas As SKCanvas, ctx As ChartContext,
-                                         results As List(Of IndicatorResult),
+                                         results As IReadOnlyList(Of IndicatorResult),
                                          indName As String, s As Integer, en As Integer)
             Dim bullPaint = GetDirPaint(indName & "_bull", ctx.Theme.BullCandle)
             Dim bearPaint = GetDirPaint(indName & "_bear", ctx.Theme.BearCandle)
@@ -197,5 +205,13 @@ Namespace Layers
             _paints(key) = p
             Return p
         End Function
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            For Each paint In _paints.Values
+                paint.Dispose()
+            Next
+            _paints.Clear()
+            _path.Dispose()
+        End Sub
     End Class
 End Namespace

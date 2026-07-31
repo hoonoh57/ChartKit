@@ -9,6 +9,7 @@ Imports System.Globalization
 Imports System.Threading.Tasks
 Imports ChartKit.Abstractions
 Imports ChartKit.Models
+Imports ChartKit.Core
 
 Namespace DataSources
 
@@ -30,6 +31,18 @@ Namespace DataSources
         Private _realtimeIntervalMinutes As Integer = 0
         Private _realtimeTickCount As Integer = 0
         Private _realtimeCandle As CandleItem
+        Private _historySymbol As String = ""
+        Private _historyInterval As CandleInterval
+        Private _historyPath As String = ""
+        Private _historyApiId As String = ""
+        Private _historyBody As String = ""
+        Private _historyCont As String = "N"
+        Private _historyNext As String = ""
+        Private _historyExhausted As Boolean = True
+        Private _historyBaseTicks As Integer
+        Private _historyTargetTicks As Integer
+        Private _historyBaseCandles As New List(Of CandleItem)
+        Private _historyEarliest As DateTime = DateTime.MaxValue
         '' 국내주식 조회 TR: 실서버 초당 5회, 모의서버는 TR별 초당 1회.
         Private Const RealMinIntervalMs As Integer = 220
         Private Const MockMinIntervalMs As Integer = 1100
@@ -100,7 +113,7 @@ Namespace DataSources
                         Dim json = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
                         If resp.StatusCode = HttpStatusCode.TooManyRequests AndAlso attempt < MaxRateLimitRetries Then
                             Dim retryMs = GetRetryDelayMs(resp, attempt)
-                            System.Diagnostics.Debug.WriteLine(
+                            ChartLog.Info(
                                 $"[KIWOOM] 429 api-id={apiId}, retry={attempt + 1}/{MaxRateLimitRetries}, wait={retryMs}ms")
                             Thread.Sleep(retryMs)
                             Continue For
@@ -140,11 +153,25 @@ Namespace DataSources
             Return dflt
         End Function
 
-        '' ── 연속조회 (최대 pages, max_rows) ──
+        '' 연속조회 안전 상한. 실제 종료 조건은 maxRows 충족 또는 cont-yn=N 이다.
+        '' 페이지당 행 수는 TR/서버 상태에 따라 달라지므로 900행 같은 추정치로
+        '' 호출 횟수를 제한하면 큰 틱봉(예: 720틱)이 요청 수보다 적게 잘린다.
+        Private Const MaxContinuationPages As Integer = 1000
+
+        '' ── 연속조회 (max_rows 충족까지) ──
         Private Function Paged(path As String, apiId As String, body As String,
                                maxRows As Integer, Optional pages As Integer = 8) As List(Of JsonElement)
+            Dim finalCont = "N", finalNext = ""
+            Return PagedContinuation(path, apiId, body, maxRows, "N", "",
+                                     finalCont, finalNext, pages)
+        End Function
+
+        Private Function PagedContinuation(path As String, apiId As String, body As String,
+                                           maxRows As Integer, startCont As String, startNext As String,
+                                           ByRef finalCont As String, ByRef finalNext As String,
+                                           Optional pages As Integer = MaxContinuationPages) As List(Of JsonElement)
             Dim rows As New List(Of JsonElement)
-            Dim cont = "N", nkey = ""
+            Dim cont = startCont, nkey = startNext
             For p = 0 To pages - 1
                 Dim oc = "N", onk = ""
                 Using doc = CallApi(path, apiId, body, cont, nkey, oc, onk)
@@ -157,9 +184,24 @@ Namespace DataSources
                         rows.Add(e.Clone())
                     Next
                 End Using
+                oc = If(oc, "").Trim().ToUpperInvariant()
+                onk = If(onk, "").Trim()
+                Dim requestedNext = nkey
                 cont = oc : nkey = onk
+                ChartLog.Info(
+                    $"[KIWOOM] page={p + 1} api-id={apiId} rows={rows.Count}/{maxRows} cont={cont} next={If(String.IsNullOrEmpty(nkey), "empty", "set")}")
                 If rows.Count >= maxRows OrElse cont <> "Y" Then Exit For
+                If String.IsNullOrEmpty(nkey) OrElse
+                   String.Equals(nkey, requestedNext, StringComparison.Ordinal) Then
+                    ChartLog.Info(
+                        $"[KIWOOM] 연속조회 키가 진행되지 않아 중단합니다. api-id={apiId}, rows={rows.Count}")
+                    cont = "N"
+                    nkey = ""
+                    Exit For
+                End If
             Next
+            finalCont = cont
+            finalNext = nkey
             Return rows
         End Function
 
@@ -208,16 +250,30 @@ Namespace DataSources
             Dim maxBars = Math.Max(1, req.Count)
             Dim adj = EnvConfig.AdjustPrice
             Dim path = "/api/dostk/chart"
+            _historySymbol = code
+            _historyInterval = req.Interval
+            _historyPath = path
+            _historyCont = "N"
+            _historyNext = ""
+            _historyExhausted = False
+            _historyBaseCandles.Clear()
+            _historyEarliest = DateTime.MaxValue
 
             Dim rows As List(Of JsonElement)
             Select Case req.Interval
                 Case CandleInterval.Day, CandleInterval.Week, CandleInterval.Month
                     Dim api = If(req.Interval = CandleInterval.Day, "ka10081",
                                  If(req.Interval = CandleInterval.Week, "ka10082", "ka10083"))
+                    Dim baseDate = If(req.To.HasValue, req.To.Value, Date.Now)
                     Dim body = JsonSerializer.Serialize(New Dictionary(Of String, String) From {
-                        {"stk_cd", code}, {"base_dt", Date.Now.ToString("yyyyMMdd")}, {"upd_stkpc_tp", adj}})
-                    rows = Paged(path, api, body, maxBars)
-                    Return ParseRows(rows, dailyMode:=True)
+                        {"stk_cd", code}, {"base_dt", baseDate.ToString("yyyyMMdd")}, {"upd_stkpc_tp", adj}})
+                    _historyApiId = api : _historyBody = body
+                    rows = PagedContinuation(path, api, body, maxBars, "N", "",
+                                             _historyCont, _historyNext)
+                    _historyExhausted = _historyCont <> "Y"
+                    Dim result = ParseRows(rows, dailyMode:=True)
+                    RememberEarliest(result)
+                    Return result
                 Case CandleInterval.Tick1, CandleInterval.Tick3, CandleInterval.Tick5, CandleInterval.Tick10, CandleInterval.Tick30,
                      CandleInterval.Tick60, CandleInterval.Tick120, CandleInterval.Tick240, CandleInterval.Tick360, CandleInterval.Tick720
                     '' 목표 틱수 = enum - 3000. base 를 골라 ka10079 로 받고 TickAggregator 로 집계.
@@ -229,13 +285,19 @@ Namespace DataSources
                     Dim tbody = JsonSerializer.Serialize(New Dictionary(Of String, String) From {
                         {"stk_cd", code}, {"tic_scope", baseTicks.ToString(CultureInfo.InvariantCulture)}, {"upd_stkpc_tp", adj}})
                     _lastTicCount = 0
-                    Dim baseRows = Paged(path, "ka10079", tbody, needBase, pages:=20)
+                    _historyApiId = "ka10079" : _historyBody = tbody
+                    _historyBaseTicks = baseTicks : _historyTargetTicks = targetTicks
+                    Dim baseRows = PagedContinuation(path, "ka10079", tbody, needBase, "N", "",
+                                                     _historyCont, _historyNext)
+                    _historyExhausted = _historyCont <> "Y"
                     Dim baseCandles = ParseRows(baseRows, dailyMode:=False)
-                    System.Diagnostics.Debug.WriteLine($"[TICK] target={targetTicks} base={baseTicks} group={groupSize} needBase={needBase} gotBase={baseCandles.Count}")
+                    _historyBaseCandles.AddRange(baseCandles)
+                    ChartLog.Info($"[TICK] target={targetTicks} base={baseTicks} group={groupSize} needBase={needBase} gotBase={baseCandles.Count}")
                     Dim agg = TickAggregator.Aggregate(baseCandles, targetTicks, baseTicks)
-                    System.Diagnostics.Debug.WriteLine($"[TICK] aggregated bars={agg.Count}")
+                    ChartLog.Info($"[TICK] aggregated bars={agg.Count}")
                     '' 최근 maxBars 개만
                     If agg.Count > maxBars Then agg = agg.GetRange(agg.Count - maxBars, maxBars)
+                    RememberEarliest(agg)
                     SyncLock _sync
                         _realtimeTargetTicks = targetTicks
                         _realtimeIntervalMinutes = 0
@@ -248,8 +310,12 @@ Namespace DataSources
                     Dim tic = CInt(req.Interval).ToString(CultureInfo.InvariantCulture)  '' 분 수
                     Dim body = JsonSerializer.Serialize(New Dictionary(Of String, String) From {
                         {"stk_cd", code}, {"tic_scope", tic}, {"upd_stkpc_tp", adj}})
-                    rows = Paged(path, "ka10080", body, maxBars)
+                    _historyApiId = "ka10080" : _historyBody = body
+                    rows = PagedContinuation(path, "ka10080", body, maxBars, "N", "",
+                                             _historyCont, _historyNext)
+                    _historyExhausted = _historyCont <> "Y"
                     Dim minuteCandles = ParseRows(rows, dailyMode:=False)
+                    RememberEarliest(minuteCandles)
                     SyncLock _sync
                         _realtimeTargetTicks = 0
                         _realtimeIntervalMinutes = CInt(req.Interval)
@@ -260,6 +326,66 @@ Namespace DataSources
                     Return minuteCandles
             End Select
         End Function
+
+        Public Function GetOlderCandles(req As CandleRequest) As List(Of CandleItem)
+            If req Is Nothing Then Throw New ArgumentNullException(NameOf(req))
+            Dim code = If(String.IsNullOrWhiteSpace(req.Symbol), EnvConfig.DefaultSymbol, req.Symbol.Trim())
+            If code <> _historySymbol OrElse req.Interval <> _historyInterval OrElse
+               String.IsNullOrEmpty(_historyApiId) Then
+                Throw New InvalidOperationException("현재 차트와 연속조회 세션이 일치하지 않습니다. 먼저 조회를 실행하세요.")
+            End If
+            Dim requestedBars = Math.Max(1, req.Count)
+            If _historyTargetTicks > 0 AndAlso _historyBaseCandles.Count > 0 Then
+                Dim cachedBars = TickAggregator.Aggregate(
+                    _historyBaseCandles, _historyTargetTicks, _historyBaseTicks).
+                    Where(Function(c) c.Dt < _historyEarliest).ToList()
+                If cachedBars.Count >= requestedBars Then
+                    cachedBars = cachedBars.GetRange(cachedBars.Count - requestedBars, requestedBars)
+                    RememberEarliest(cachedBars)
+                    Return cachedBars
+                End If
+            End If
+            If _historyExhausted OrElse _historyCont <> "Y" OrElse String.IsNullOrEmpty(_historyNext) Then
+                Return New List(Of CandleItem)
+            End If
+
+            Dim requestedRows = requestedBars
+            If _historyTargetTicks > 0 Then
+                Dim groupSize = Math.Max(1, _historyTargetTicks \ _historyBaseTicks)
+                '' 페이지 경계의 미완성 묶음 때문에 요청 봉이 하나 부족해지는 것을 막는다.
+                requestedRows = (requestedBars * groupSize) + groupSize
+            End If
+            Dim rows = PagedContinuation(_historyPath, _historyApiId, _historyBody,
+                                         requestedRows, _historyCont, _historyNext,
+                                         _historyCont, _historyNext)
+            _historyExhausted = _historyCont <> "Y"
+            If rows.Count = 0 Then Return New List(Of CandleItem)
+
+            If _historyTargetTicks > 0 Then
+                Dim olderBase = ParseRows(rows, dailyMode:=False)
+                _historyBaseCandles.InsertRange(0, olderBase)
+                Dim allBars = TickAggregator.Aggregate(_historyBaseCandles, _historyTargetTicks, _historyBaseTicks)
+                Dim older = allBars.Where(Function(c) c.Dt < _historyEarliest).ToList()
+                If older.Count > requestedBars Then older = older.GetRange(older.Count - requestedBars, requestedBars)
+                RememberEarliest(older)
+                Return older
+            End If
+
+            Dim dailyMode = _historyInterval = CandleInterval.Day OrElse
+                            _historyInterval = CandleInterval.Week OrElse
+                            _historyInterval = CandleInterval.Month
+            Dim result = ParseRows(rows, dailyMode)
+            result = result.Where(Function(c) c.Dt < _historyEarliest).ToList()
+            If result.Count > requestedBars Then result = result.GetRange(result.Count - requestedBars, requestedBars)
+            RememberEarliest(result)
+            Return result
+        End Function
+
+        Private Sub RememberEarliest(candles As List(Of CandleItem))
+            If candles Is Nothing OrElse candles.Count = 0 Then Return
+            Dim earliest = candles.Min(Function(c) c.Dt)
+            If earliest < _historyEarliest Then _historyEarliest = earliest
+        End Sub
 
         '' 응답 rows(최신->과거) 를 뒤집어 시간 오름차순 CandleItem 으로 변환
         Private Function ParseRows(rows As List(Of JsonElement), dailyMode As Boolean) As List(Of CandleItem)
@@ -274,7 +400,7 @@ Namespace DataSources
                 Dim v = Num(row, "trde_qty")
                 Dim tRaw = If(dailyMode, Str(row, "dt", "stck_bsop_date"), Str(row, "cntr_tm", "dt"))
                 If outp.Count < 3 Then
-                    System.Diagnostics.Debug.WriteLine("[KIWOOM] rawTime=""" & tRaw & """  keys=" & DumpKeys(row))
+                    ChartLog.Info("[KIWOOM] rawTime=""" & tRaw & """  keys=" & DumpKeys(row))
                 End If
                 Dim dt = ParseKiwoomTime(tRaw, dailyMode)
                 outp.Add(New CandleItem With {
@@ -369,7 +495,8 @@ Namespace DataSources
             If cts IsNot Nothing Then
                 Try
                     cts.Cancel()
-                Catch
+                Catch ex As Exception
+                    ChartKit.Core.ChartLog.Warning("키움 실시간 취소 처리 실패", ex)
                 End Try
                 cts.Dispose()
             End If
@@ -380,7 +507,8 @@ Namespace DataSources
                 Try
                     socket.Abort()
                     socket.Dispose()
-                Catch
+                Catch ex As Exception
+                    ChartKit.Core.ChartLog.Warning("키움 WebSocket 종료 실패", ex)
                 End Try
             End If
         End Sub
@@ -392,14 +520,15 @@ Namespace DataSources
                 Catch ex As OperationCanceledException When cancel.IsCancellationRequested
                     Exit While
                 Catch ex As Exception
-                    System.Diagnostics.Debug.WriteLine("[KIWOOM-WS] " & ex.Message)
+                    ChartKit.Core.ChartLog.Warning("키움 WebSocket 세션 오류", ex)
                 Finally
                     Dim staleSocket = _realtimeSocket
                     _realtimeSocket = Nothing
                     If staleSocket IsNot Nothing Then
                         Try
                             staleSocket.Dispose()
-                        Catch
+                        Catch ex As Exception
+                            ChartKit.Core.ChartLog.Warning("키움 WebSocket 리소스 폐기 실패", ex)
                         End Try
                     End If
                 End Try

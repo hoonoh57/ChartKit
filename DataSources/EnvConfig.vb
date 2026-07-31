@@ -6,48 +6,50 @@ Namespace DataSources
     '' 탐색 순서: 실행폴더 -> 상위 -> 상위상위 의 .env
     Public Class EnvConfig
         Private Shared ReadOnly _map As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
+        Private Shared ReadOnly _sync As New Object()
         Private Shared _loaded As Boolean = False
-
-        '' .env 탐색: (1) 환경변수 CHARTKIT_ENV_PATH  (2) 고정 후보경로들
-        ''            (3) 실행폴더에서 상위로 5단계
-        Private Shared ReadOnly _candidatePaths As String() = {
-            "E:\2026\gpt\vb\chart_base_trading\.env"
-        }
 
         Public Shared Sub EnsureLoaded()
             If _loaded Then Return
-            _loaded = True
+            SyncLock _sync
+                If _loaded Then Return
+                _loaded = True
 
-            '' (1) 환경변수로 명시 지정 시 최우선
-            Dim envOverride = Environment.GetEnvironmentVariable("CHARTKIT_ENV_PATH")
-            If Not String.IsNullOrEmpty(envOverride) AndAlso File.Exists(envOverride) Then
-                LoadFile(envOverride)
-                _sourcePath = envOverride
-                Return
-            End If
+                Try
+                    '' (1) 환경변수로 명시 지정 시 최우선
+                    Dim envOverride = Environment.GetEnvironmentVariable("CHARTKIT_ENV_PATH")
+                    If Not String.IsNullOrEmpty(envOverride) AndAlso File.Exists(envOverride) Then
+                        LoadFile(envOverride)
+                        _sourcePath = envOverride
+                        Return
+                    End If
 
-            '' (2) 고정 후보경로
-            For Each cand In _candidatePaths
-                If File.Exists(cand) Then
-                    LoadFile(cand)
-                    _sourcePath = cand
-                    Return
-                End If
-            Next
+                    '' (2) 실행폴더 -> 상위 5단계
+                    Dim dir = AppDomain.CurrentDomain.BaseDirectory
+                    For hop = 0 To 5
+                        Dim p = Path.Combine(dir, ".env")
+                        If File.Exists(p) Then
+                            LoadFile(p)
+                            _sourcePath = p
+                            Return
+                        End If
+                        Dim parent = Directory.GetParent(dir)
+                        If parent Is Nothing Then Exit For
+                        dir = parent.FullName
+                    Next
+                Catch ex As Exception
+                    ChartKit.Core.ChartLog.Warning(".env 설정 불러오기 실패", ex)
+                End Try
+            End SyncLock
+        End Sub
 
-            '' (3) 실행폴더 -> 상위 5단계
-            Dim dir = AppDomain.CurrentDomain.BaseDirectory
-            For hop = 0 To 5
-                Dim p = Path.Combine(dir, ".env")
-                If File.Exists(p) Then
-                    LoadFile(p)
-                    _sourcePath = p
-                    Return
-                End If
-                Dim parent = Directory.GetParent(dir)
-                If parent Is Nothing Then Exit For
-                dir = parent.FullName
-            Next
+        Public Shared Sub Reload()
+            SyncLock _sync
+                _map.Clear()
+                _sourcePath = "(not found)"
+                _loaded = False
+            End SyncLock
+            EnsureLoaded()
         End Sub
 
         '' 어느 .env 를 읽었는지 (진단용)

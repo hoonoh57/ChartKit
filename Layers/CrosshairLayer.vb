@@ -95,42 +95,10 @@ Namespace Layers
         End Function
 
         Private Shared Function GetPanelRange(ctx As ChartContext, slot As Integer, ByRef vmin As Single, ByRef vmax As Single) As Boolean
-            vmin = Single.MaxValue : vmax = Single.MinValue
-            If ctx.Engine Is Nothing Then Return False
-
-            Dim panelIdxs As New List(Of Integer)()
-            For Each ind In ctx.Engine.GetAll()
-                If ind.PanelIndex > 0 AndAlso Not panelIdxs.Contains(ind.PanelIndex) Then panelIdxs.Add(ind.PanelIndex)
-            Next
-            panelIdxs.Sort()
-            If slot < 0 OrElse slot >= panelIdxs.Count Then Return False
-            Dim panelIndex = panelIdxs(slot)
-
-            Dim s = Math.Max(0, ctx.StartIndex)
-            Dim en = Math.Min(ctx.Candles.Count - 1, ctx.EndIndex)
-            For Each ind In ctx.Engine.GetAll()
-                If ind.PanelIndex <> panelIndex Then Continue For
-                Dim results As List(Of IndicatorResult) = Nothing
-                If Not ctx.Engine.Results.TryGetValue(ind.Name, results) Then Continue For
-                If results Is Nothing Then Continue For
-                Dim maxI = Math.Min(en, results.Count - 1)
-                For i = s To maxI
-                    Dim r = results(i)
-                    If r Is Nothing OrElse r.Values Is Nothing Then Continue For
-                    For Each kv In r.Values
-                        Dim v = kv.Value
-                        If Single.IsNaN(v) Then Continue For
-                        Dim ku = kv.Key.ToUpperInvariant()
-                        If ku = "DIRECTION" OrElse ku = "HIST" OrElse ku = "HISTOGRAM" OrElse ku = "MA" OrElse ku = "ATR" OrElse ku = "SLOPE" Then Continue For
-                        If v < vmin Then vmin = v
-                        If v > vmax Then vmax = v
-                    Next
-                Next
-            Next
-            If vmin = Single.MaxValue OrElse vmax = Single.MinValue Then Return False
-            If vmax <= vmin Then vmax = vmin + 1
-            Dim pad = (vmax - vmin) * 0.05F
-            vmin -= pad : vmax += pad
+            Dim scale As ChartKit.Core.PanelScale = Nothing
+            If ctx.PanelScales Is Nothing OrElse Not ctx.PanelScales.TryGetValue(slot, scale) Then Return False
+            vmin = scale.Minimum
+            vmax = scale.Maximum
             Return True
         End Function
 
@@ -147,5 +115,11 @@ Namespace Layers
             If price >= 100 Then Return price.ToString("N1")
             Return price.ToString("N2")
         End Function
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            _paintLine.Dispose()
+            _paintLabel.Dispose()
+            _paintText.Dispose()
+        End Sub
     End Class
 End Namespace

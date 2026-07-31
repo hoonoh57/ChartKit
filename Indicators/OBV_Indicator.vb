@@ -1,147 +1,122 @@
-﻿Imports ChartKit.Abstractions
+Imports ChartKit.Abstractions
 Imports ChartKit.Models
 
 Namespace Indicators
-    '' OBV + SMA Signal (증분 계산). 원본 OBV_Indicator 그대로.
     Public Class OBV_Indicator
-        Implements IIndicator
+        Inherits IncrementalIndicatorBase
 
-        Private _maPeriod As Integer = 20
-        Private _params As New Dictionary(Of String, Object) From {{"MAPeriod", 20}}
+        Private _maPeriod As Integer
+        Private _params As Dictionary(Of String, Object)
+        Private _previousClose As Single
+        Private _hasPrevious As Boolean
+        Private _obv As Double
+        Private _window() As Double
+        Private _head, _count As Integer
+        Private _sum As Double
 
-        Private _lastOBV As Single = 0
-        Private _prevOBV As Single = 0
-        Private _stateIndex As Integer = -1
-        Private _ringBuffer() As Single
-        Private _ringPos As Integer = 0
-        Private _ringCount As Integer = 0
-        Private _ringSum As Single = 0
+        Private _savedPreviousClose As Single
+        Private _savedHasPrevious As Boolean
+        Private _savedObv, _savedSum, _savedHeadValue As Double
+        Private _savedHead, _savedCount As Integer
 
         Public Sub New(Optional maPeriod As Integer = 20)
-            _maPeriod = maPeriod
-            _params("MAPeriod") = _maPeriod
-            ReDim _ringBuffer(_maPeriod - 1)
+            SetPeriod(maPeriod)
         End Sub
-
-        Public ReadOnly Property Name As String Implements IIndicator.Name
+        Public Overrides ReadOnly Property Name As String
             Get
                 Return $"OBV_{_maPeriod}"
             End Get
         End Property
-        Public ReadOnly Property DisplayName As String Implements IIndicator.DisplayName
+        Public Overrides ReadOnly Property DisplayName As String
             Get
                 Return $"OBV(MA{_maPeriod})"
             End Get
         End Property
-        Public ReadOnly Property PanelIndex As Integer Implements IIndicator.PanelIndex
+        Public Overrides ReadOnly Property PanelIndex As Integer
             Get
                 Return 5
             End Get
         End Property
-        Public Property Parameters As Dictionary(Of String, Object) Implements IIndicator.Parameters
+        Public Overrides Property Parameters As Dictionary(Of String, Object)
             Get
                 Return _params
             End Get
             Set(value As Dictionary(Of String, Object))
-                _params = value
-                If _params.ContainsKey("MAPeriod") Then _maPeriod = CInt(_params("MAPeriod"))
+                Dim p = If(value, New Dictionary(Of String, Object))
+                SetPeriod(If(p.ContainsKey("MAPeriod"), Convert.ToInt32(p("MAPeriod")), _maPeriod))
             End Set
         End Property
-
-        Public Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult) Implements IIndicator.Calculate
-            Dim count = candles.Count
-            Dim results As New List(Of IndicatorResult)(count)
-            If count = 0 Then Return results
-
-            ReDim _ringBuffer(_maPeriod - 1)
-            _ringPos = 0
-            _ringCount = 0
-            _ringSum = 0
-            _lastOBV = 0
-            _prevOBV = 0
-
-            Dim obv As Single = CSng(candles(0).Volume)
-            _lastOBV = obv
-            PushRing(obv)
-            results.Add(MakeResult(0, obv, GetRingSMA()))
-
-            For i = 1 To count - 1
-                _prevOBV = obv
-                If candles(i).Close > candles(i - 1).Close Then
-                    obv += CSng(candles(i).Volume)
-                ElseIf candles(i).Close < candles(i - 1).Close Then
-                    obv -= CSng(candles(i).Volume)
-                End If
-                _lastOBV = obv
-                PushRing(obv)
-                results.Add(MakeResult(i, obv, GetRingSMA()))
+        Private Sub SetPeriod(value As Integer)
+            _maPeriod = Math.Max(1, value)
+            _params = New Dictionary(Of String, Object) From {{"MAPeriod", _maPeriod}}
+            _window = New Double(_maPeriod - 1) {}
+            ResetState()
+        End Sub
+        Public Overrides Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult)
+            Dim results As New List(Of IndicatorResult)(candles.Count)
+            ResetState()
+            For i = 0 To candles.Count - 1
+                If i = candles.Count - 1 Then SaveState()
+                results.Add(StepCandle(candles(i), i))
             Next
-
-            _stateIndex = count - 1
+            If candles.Count > 0 Then
+                Dim ring = TryCast(candles, CandleRingBuffer)
+                InitializeIncrementalSequence(If(ring Is Nothing, candles.Count - 1L, ring.LastSequence))
+            End If
             Return results
         End Function
-
-        Public Function UpdateLast(candles As IReadOnlyList(Of CandleItem), prevResults As List(Of IndicatorResult)) As IndicatorResult Implements IIndicator.UpdateLast
-            Dim i = candles.Count - 1
-
-            If _stateIndex < 0 OrElse i < 1 Then
-                Dim full = Calculate(candles)
-                If full.Count > 0 Then Return full(full.Count - 1)
-                Return MakeResult(i, 0, Single.NaN)
+        Protected Overrides Function StepCandle(candle As CandleItem, index As Integer) As IndicatorResult
+            If Not _hasPrevious Then
+                _obv = candle.Volume
+                _hasPrevious = True
+            ElseIf candle.Close > _previousClose Then
+                _obv += candle.Volume
+            ElseIf candle.Close < _previousClose Then
+                _obv -= candle.Volume
             End If
-
-            If i = _stateIndex Then
-                UndoRing()
-                _lastOBV = _prevOBV
-            End If
-
-            Dim obv = _lastOBV
-            _prevOBV = obv
-            If candles(i).Close > candles(i - 1).Close Then
-                obv += CSng(candles(i).Volume)
-            ElseIf candles(i).Close < candles(i - 1).Close Then
-                obv -= CSng(candles(i).Volume)
-            End If
-            _lastOBV = obv
-            PushRing(obv)
-            _stateIndex = i
-
-            Return MakeResult(i, obv, GetRingSMA())
+            _previousClose = candle.Close
+            Push(_obv)
+            Dim signal = If(_count = _maPeriod, CSng(_sum / _maPeriod), Single.NaN)
+            Return MakeResult(index, CSng(_obv), signal)
         End Function
-
-        Private Sub PushRing(value As Single)
-            If _ringCount >= _maPeriod Then
-                _ringSum -= _ringBuffer(_ringPos)
-            End If
-            _ringBuffer(_ringPos) = value
-            _ringSum += value
-            _ringPos = (_ringPos + 1) Mod _maPeriod
-            If _ringCount < _maPeriod Then _ringCount += 1
-        End Sub
-
-        Private Sub UndoRing()
-            If _ringCount <= 0 Then Return
-            _ringPos = (_ringPos - 1 + _maPeriod) Mod _maPeriod
-            _ringSum -= _ringBuffer(_ringPos)
-            If _ringCount <= _maPeriod Then _ringCount -= 1
-        End Sub
-
-        Private Function GetRingSMA() As Single
-            If _ringCount < _maPeriod Then Return Single.NaN
-            Return _ringSum / _maPeriod
-        End Function
-
-        Private Function MakeResult(idx As Integer, obv As Single, sma As Single) As IndicatorResult
-            Dim r As New IndicatorResult With {.Name = Name, .Index = idx, .PanelIndex = PanelIndex,
-                .Values = New Dictionary(Of String, Single)}
-            r.Values("OBV") = obv
-            r.Values("Signal") = sma
-            If Not Single.IsNaN(sma) Then
-                r.Values("Direction") = If(obv > sma, 1.0F, -1.0F)
+        Private Sub Push(value As Double)
+            If _count < _maPeriod Then
+                _window((_head + _count) Mod _maPeriod) = value
+                _count += 1
+                _sum += value
             Else
-                r.Values("Direction") = Single.NaN
+                _sum += value - _window(_head)
+                _window(_head) = value
+                _head = (_head + 1) Mod _maPeriod
             End If
-            Return r
+        End Sub
+        Protected Overrides Sub SaveState()
+            _savedPreviousClose = _previousClose : _savedHasPrevious = _hasPrevious
+            _savedObv = _obv : _savedHead = _head : _savedCount = _count : _savedSum = _sum
+            If _count = _maPeriod Then _savedHeadValue = _window(_head)
+        End Sub
+        Protected Overrides Sub RestoreState()
+            _previousClose = _savedPreviousClose : _hasPrevious = _savedHasPrevious
+            _obv = _savedObv : _head = _savedHead : _count = _savedCount : _sum = _savedSum
+            If _count = _maPeriod Then _window(_head) = _savedHeadValue
+        End Sub
+        Private Sub ResetState()
+            _previousClose = 0 : _hasPrevious = False : _obv = 0
+            _head = 0 : _count = 0 : _sum = 0
+            Array.Clear(_window, 0, _window.Length)
+            ResetIncrementalIndex()
+        End Sub
+        Private Function MakeResult(index As Integer, obv As Single, signal As Single) As IndicatorResult
+            Return New IndicatorResult With {
+                .Name = Name, .Index = index, .PanelIndex = PanelIndex,
+                .Values = New Dictionary(Of String, Single) From {
+                    {"OBV", obv}, {"Signal", signal},
+                    {"Direction", If(Single.IsNaN(signal), Single.NaN, If(obv > signal, 1.0F, -1.0F))}
+                },
+                .SeriesKinds = New Dictionary(Of String, SeriesKind) From {
+                    {"OBV", SeriesKind.Line}, {"Signal", SeriesKind.Line}, {"Direction", SeriesKind.Meta}
+                }
+            }
         End Function
     End Class
 End Namespace

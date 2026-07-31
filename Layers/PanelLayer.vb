@@ -46,6 +46,7 @@ Namespace Layers
         Private _axisText As SKPaint
         Private _nameText As SKPaint
         Private ReadOnly _path As New SKPath()
+        Private _paintThemeVersion As Integer = -1
 
         '' 라인으로 그리지 않는 키 (기준선/플래그)
         Private Shared Function IsBaselineKey(k As String) As Boolean
@@ -94,40 +95,11 @@ Namespace Layers
 
                 Dim inds = ctx.Engine.GetAll().Where(Function(x) x.PanelIndex = panelIndex).ToList()
 
-                '' ── 값 범위 계산 (라인 키 + Upper/Lower 포함, 무시 키 제외) ──
-                Dim vmin As Single = Single.MaxValue
-                Dim vmax As Single = Single.MinValue
-                '' 기준선 키 → 레벨값 (Upper/Lower/Baseline 등 임의 개수)
-                Dim baselines As New Dictionary(Of String, Single)()
-                For Each ind In inds
-                    Dim results As List(Of IndicatorResult) = Nothing
-                    If Not ctx.Engine.Results.TryGetValue(ind.Name, results) Then Continue For
-                    If results Is Nothing Then Continue For
-                    Dim maxI = Math.Min(en, results.Count - 1)
-                    For i = s To maxI
-                        Dim r = results(i)
-                        If r Is Nothing OrElse r.Values Is Nothing Then Continue For
-                        For Each kv In r.Values
-                            Dim v = kv.Value
-                            If Single.IsNaN(v) Then Continue For
-                            If IsIgnoredKey(kv.Key) Then Continue For
-                            If IsBaselineKey(kv.Key) Then
-                                baselines(kv.Key.ToUpperInvariant()) = v
-                                Continue For
-                            End If
-                            If v < vmin Then vmin = v
-                            If v > vmax Then vmax = v
-                        Next
-                    Next
-                Next
-                '' 기준선 레벨도 범위에 포함
-                For Each lv In baselines.Values
-                    vmin = Math.Min(vmin, lv) : vmax = Math.Max(vmax, lv)
-                Next
-                If vmin = Single.MaxValue OrElse vmax = Single.MinValue Then Continue For
-                If vmax <= vmin Then vmax = vmin + 1
-                Dim pad = (vmax - vmin) * 0.05F
-                vmin -= pad : vmax += pad
+                Dim scale As ChartKit.Core.PanelScale = Nothing
+                If ctx.PanelScales Is Nothing OrElse Not ctx.PanelScales.TryGetValue(slot, scale) Then Continue For
+                Dim vmin = scale.Minimum
+                Dim vmax = scale.Maximum
+                Dim baselines = scale.Baselines
 
                 '' 과열/침체 음영 패스 (지표선/축/기준선보다 먼저 = 뒤에 깔림)
                 If ctx.PanelZones IsNot Nothing Then
@@ -165,7 +137,7 @@ Namespace Layers
 
                 '' ── MACD 히스토그램 막대 패스 (Hist 키, 0선 기준, 라인보다 먼저) ──
                 For Each ind In inds
-                    Dim hres As List(Of IndicatorResult) = Nothing
+                    Dim hres As ChartKit.Models.IndicatorResultRingBuffer = Nothing
                     If Not ctx.Engine.Results.TryGetValue(ind.Name, hres) Then Continue For
                     If hres Is Nothing OrElse hres.Count = 0 Then Continue For
                     Dim hasHist = False
@@ -197,7 +169,7 @@ Namespace Layers
                 Dim legendX = rect.Left + 4
                 Dim legendY = rect.Top + 12
                 For Each ind In inds
-                    Dim results As List(Of IndicatorResult) = Nothing
+                    Dim results As ChartKit.Models.IndicatorResultRingBuffer = Nothing
                     If Not ctx.Engine.Results.TryGetValue(ind.Name, results) Then Continue For
                     If results Is Nothing OrElse results.Count = 0 Then Continue For
 
@@ -260,12 +232,12 @@ Namespace Layers
         End Sub
 
         '' 결과에서 라인으로 그릴 키 목록 (첫 유효 결과 기준, 순서 보존)
-        Private Shared Function GetLineKeys(results As List(Of IndicatorResult)) As List(Of String)
+        Private Shared Function GetLineKeys(results As IReadOnlyList(Of IndicatorResult)) As List(Of String)
             Dim keys As New List(Of String)()
             For Each r In results
                 If r Is Nothing OrElse r.Values Is Nothing OrElse r.Values.Count = 0 Then Continue For
                 For Each k In r.Values.Keys
-                    If IsBaselineKey(k) OrElse IsIgnoredKey(k) Then Continue For
+                    If r.KindOf(k) <> SeriesKind.Line Then Continue For
                     If Not keys.Contains(k) Then keys.Add(k)
                 Next
                 If keys.Count > 0 Then Exit For
@@ -274,7 +246,9 @@ Namespace Layers
         End Function
 
         Private Sub EnsurePaints(t As ChartTheme)
-            If _axisText Is Nothing Then
+            If _axisText Is Nothing OrElse _paintThemeVersion <> t.Version Then
+                _axisText?.Dispose()
+                _nameText?.Dispose()
                 _axisText = New SKPaint With {
                     .Color = t.AxisText, .TextSize = t.AxisFontSize, .IsAntialias = True,
                     .Typeface = SKTypeface.FromFamilyName("Consolas"), .TextAlign = SKTextAlign.Left}
@@ -283,6 +257,7 @@ Namespace Layers
                 _nameText = New SKPaint With {
                     .TextSize = 11, .IsAntialias = True,
                     .Typeface = SKTypeface.FromFamilyName("맑은 고딕")}
+                _paintThemeVersion = t.Version
             End If
         End Sub
 
@@ -355,5 +330,18 @@ Namespace Layers
             Dim t = (v - vmin) / (vmax - vmin)
             Return rect.Bottom - t * rect.Height
         End Function
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            _linePaint.Dispose()
+            _basePaint.Dispose()
+            _overZonePaint.Dispose()
+            _underZonePaint.Dispose()
+            _histUpPaint.Dispose()
+            _histDnPaint.Dispose()
+            _borderPaint.Dispose()
+            _axisText?.Dispose() : _axisText = Nothing
+            _nameText?.Dispose() : _nameText = Nothing
+            _path.Dispose()
+        End Sub
     End Class
 End Namespace

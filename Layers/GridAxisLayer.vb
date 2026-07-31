@@ -13,6 +13,7 @@ Namespace Layers
             End Get
         End Property
         Public Property IsVisible As Boolean = True Implements IChartLayer.IsVisible
+        Public Property GridVisible As Boolean = True
         Public ReadOnly Property ZOrder As Integer Implements IChartLayer.ZOrder
             Get
                 Return 0
@@ -21,18 +22,22 @@ Namespace Layers
 
         Private _paintGrid As SKPaint
         Private _paintAxisText As SKPaint
+        Private _paintThemeVersion As Integer = -1
 
         Public Sub Draw(canvas As SKCanvas, ctx As ChartContext) Implements IChartLayer.Draw
             EnsurePaints(ctx.Theme)
-            DrawGrid(canvas, ctx)
+            If GridVisible Then DrawGrid(canvas, ctx)
             DrawAxisY(canvas, ctx)
             DrawAxisX(canvas, ctx)
         End Sub
 
         Private Sub EnsurePaints(t As ChartTheme)
-            If _paintGrid IsNot Nothing Then Return
+            If _paintGrid IsNot Nothing AndAlso _paintThemeVersion = t.Version Then Return
+            _paintGrid?.Dispose()
+            _paintAxisText?.Dispose()
             _paintGrid = New SKPaint With {.Style = SKPaintStyle.Stroke, .Color = t.Grid, .StrokeWidth = 1, .IsAntialias = False}
             _paintAxisText = New SKPaint With {.Color = t.AxisText, .TextSize = t.AxisFontSize, .IsAntialias = True, .Typeface = SKTypeface.FromFamilyName("Consolas")}
+            _paintThemeVersion = t.Version
         End Sub
 
         '' ===== 원본 DrawGrid 그대로 (MARGIN_BOTTOM -> ctx.Theme.MarginBottom, _mainRect -> ctx.MainRect 등) =====
@@ -229,5 +234,10 @@ Namespace Layers
             If price >= 100 Then Return price.ToString("N1")
             Return price.ToString("N2")
         End Function
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            _paintGrid?.Dispose() : _paintGrid = Nothing
+            _paintAxisText?.Dispose() : _paintAxisText = Nothing
+        End Sub
     End Class
 End Namespace

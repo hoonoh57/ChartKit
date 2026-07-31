@@ -44,6 +44,9 @@ Namespace Core
     End Enum
 
     Public Class SignalRule
+        <System.ComponentModel.Browsable(False)>
+        Public Property Id As String = Guid.NewGuid().ToString("N")
+
         <System.ComponentModel.Category("신호"), System.ComponentModel.DisplayName("검색식명")>
         Public Property Name As String = ""
 
@@ -144,6 +147,8 @@ Namespace Core
         Public Property PctAxisMode As Integer = 0
         Public Property ShadeRules As New List(Of OverlayShadeRule)()
         Public Property SignalRules As New List(Of SignalRule)()
+        Public Property StrategyReentryLockMode As Integer = 1
+        Public Property StrategyReentryLockThresholdPct As Double = 10.0R
 
         Private Shared ReadOnly _opts As New JsonSerializerOptions With {.WriteIndented = True}
 
@@ -163,8 +168,8 @@ Namespace Core
             Try
                 Dim json = JsonSerializer.Serialize(Me, _opts)
                 File.WriteAllText(GetPath(profile), json)
-            Catch
-                '' 저장 실패는 무시(치명적 아님)
+            Catch ex As Exception
+                ChartLog.Warning($"차트 상태 저장 실패: {profile}", ex)
             End Try
         End Sub
 
@@ -174,7 +179,8 @@ Namespace Core
                 If Not File.Exists(p) Then Return Nothing
                 Dim json = File.ReadAllText(p)
                 Return JsonSerializer.Deserialize(Of ChartState)(json)
-            Catch
+            Catch ex As Exception
+                ChartLog.Warning($"차트 상태 불러오기 실패: {profile}", ex)
                 Return Nothing
             End Try
         End Function

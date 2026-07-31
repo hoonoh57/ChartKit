@@ -18,11 +18,15 @@ Namespace Layers
         End Property
 
         Private _bull As SKPaint, _bear As SKPaint
+        Private _paintThemeVersion As Integer = -1
 
         Public Sub Draw(canvas As SKCanvas, ctx As ChartContext) Implements IChartLayer.Draw
-            If _bull Is Nothing Then
+            If _bull Is Nothing OrElse _paintThemeVersion <> ctx.Theme.Version Then
+                _bull?.Dispose()
+                _bear?.Dispose()
                 _bull = New SKPaint With {.Style = SKPaintStyle.Fill, .Color = ctx.Theme.BullVolume, .IsAntialias = False}
                 _bear = New SKPaint With {.Style = SKPaintStyle.Fill, .Color = ctx.Theme.BearVolume, .IsAntialias = False}
+                _paintThemeVersion = ctx.Theme.Version
             End If
             Dim r = ctx.VisibleRange()
             For i As Integer = r.Item1 To r.Item2
@@ -34,6 +38,11 @@ Namespace Layers
                 canvas.DrawRect(x - halfW, yTop, ctx.CandleWidth - 1, yBot - yTop,
                                 If(c.Close >= c.Open, _bull, _bear))
             Next
+        End Sub
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            _bull?.Dispose() : _bull = Nothing
+            _bear?.Dispose() : _bear = Nothing
         End Sub
     End Class
 End Namespace

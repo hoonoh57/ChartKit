@@ -12,6 +12,7 @@ Namespace Models
         Private ReadOnly _items() As CandleItem
         Private _head As Integer
         Private _count As Integer
+        Private _firstSequence As Long
 
         Public Sub New(capacity As Integer)
             If capacity <= 0 Then Throw New ArgumentOutOfRangeException(NameOf(capacity))
@@ -27,6 +28,18 @@ Namespace Models
         Public ReadOnly Property Count As Integer Implements IReadOnlyCollection(Of CandleItem).Count
             Get
                 Return _count
+            End Get
+        End Property
+
+        Public ReadOnly Property FirstSequence As Long
+            Get
+                Return _firstSequence
+            End Get
+        End Property
+
+        Public ReadOnly Property LastSequence As Long
+            Get
+                Return If(_count = 0, _firstSequence - 1, _firstSequence + _count - 1)
             End Get
         End Property
 
@@ -56,6 +69,7 @@ Namespace Models
             End If
             _items(_head) = value
             _head = (_head + 1) Mod Capacity
+            _firstSequence += 1
             Return True
         End Function
 
@@ -63,6 +77,7 @@ Namespace Models
             Array.Clear(_items, 0, _items.Length)
             _head = 0
             _count = 0
+            _firstSequence = 0
         End Sub
 
         Public Function FindIndex(predicate As Predicate(Of CandleItem)) As Integer

@@ -10,6 +10,6 @@ Namespace Abstractions
 
         Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult)
         Function UpdateLast(candles As IReadOnlyList(Of CandleItem),
-                            prevResults As List(Of IndicatorResult)) As IndicatorResult
+                            prevResults As IReadOnlyList(Of IndicatorResult)) As IndicatorResult
     End Interface
 End Namespace

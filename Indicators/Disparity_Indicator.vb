@@ -1,97 +1,103 @@
-﻿Imports ChartKit.Abstractions
+Imports ChartKit.Abstractions
 Imports ChartKit.Models
 
 Namespace Indicators
-    '' Disparity_Indicator — 이격도 (Close / MA * 100). 서브패널(PanelIndex=6). 원본 로직 그대로.
     Public Class Disparity_Indicator
-        Implements IIndicator
+        Inherits IncrementalIndicatorBase
 
-        Private _period As Integer = 20
-        Private _params As New Dictionary(Of String, Object) From {{"Period", 20}}
+        Private _period As Integer
+        Private _params As Dictionary(Of String, Object)
+        Private _window() As Single
+        Private _head, _count As Integer
+        Private _sum As Double
+        Private _savedHead, _savedCount As Integer
+        Private _savedSum As Double
+        Private _savedHeadValue As Single
 
         Public Sub New(Optional period As Integer = 20)
-            _period = period
-            _params("Period") = _period
+            SetPeriod(period)
         End Sub
-
-        Public ReadOnly Property Name As String Implements IIndicator.Name
+        Public Overrides ReadOnly Property Name As String
             Get
                 Return $"DISP_{_period}"
             End Get
         End Property
-        Public ReadOnly Property DisplayName As String Implements IIndicator.DisplayName
+        Public Overrides ReadOnly Property DisplayName As String
             Get
                 Return $"이격도({_period})"
             End Get
         End Property
-        Public ReadOnly Property PanelIndex As Integer Implements IIndicator.PanelIndex
+        Public Overrides ReadOnly Property PanelIndex As Integer
             Get
                 Return 6
             End Get
         End Property
-        Public Property Parameters As Dictionary(Of String, Object) Implements IIndicator.Parameters
+        Public Overrides Property Parameters As Dictionary(Of String, Object)
             Get
                 Return _params
             End Get
             Set(value As Dictionary(Of String, Object))
-                _params = value
-                If _params.ContainsKey("Period") Then _period = CInt(_params("Period"))
+                Dim p = If(value, New Dictionary(Of String, Object))
+                SetPeriod(If(p.ContainsKey("Period"), Convert.ToInt32(p("Period")), _period))
             End Set
         End Property
-
-        Public Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult) Implements IIndicator.Calculate
-            Dim count = candles.Count
-            Dim results As New List(Of IndicatorResult)(count)
-            Dim maSum As Single = 0
-            For i = 0 To count - 1
-                maSum += candles(i).Close
-                If i >= _period Then maSum -= candles(i - _period).Close
-                Dim r As New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = PanelIndex,
-                    .Values = New Dictionary(Of String, Single)}
-                If i < _period - 1 Then
-                    r.Values("Value") = Single.NaN
-                    r.Values("MA") = Single.NaN
-                Else
-                    Dim ma = maSum / _period
-                    If ma > 0 Then
-                        r.Values("Value") = (candles(i).Close / ma) * 100.0F
-                    Else
-                        r.Values("Value") = 100.0F
-                    End If
-                    r.Values("MA") = ma
-                    r.Values("Upper") = 105
-                    r.Values("Baseline") = 100
-                    r.Values("Lower") = 95
-                End If
-                results.Add(r)
+        Private Sub SetPeriod(value As Integer)
+            _period = Math.Max(1, value)
+            _params = New Dictionary(Of String, Object) From {{"Period", _period}}
+            _window = New Single(_period - 1) {}
+            ResetState()
+        End Sub
+        Public Overrides Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult)
+            Dim results As New List(Of IndicatorResult)(candles.Count)
+            ResetState()
+            For i = 0 To candles.Count - 1
+                If i = candles.Count - 1 Then SaveState()
+                results.Add(StepCandle(candles(i), i))
             Next
+            If candles.Count > 0 Then
+                Dim ring = TryCast(candles, CandleRingBuffer)
+                InitializeIncrementalSequence(If(ring Is Nothing, candles.Count - 1L, ring.LastSequence))
+            End If
             Return results
         End Function
-
-        Public Function UpdateLast(candles As IReadOnlyList(Of CandleItem), prevResults As List(Of IndicatorResult)) As IndicatorResult Implements IIndicator.UpdateLast
-            Dim i = candles.Count - 1
-            Dim r As New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = PanelIndex,
-                .Values = New Dictionary(Of String, Single)}
-            If i < _period - 1 Then
-                r.Values("Value") = Single.NaN
-                r.Values("MA") = Single.NaN
-                Return r
-            End If
-            Dim sum As Single = 0
-            For j = i - _period + 1 To i
-                sum += candles(j).Close
-            Next
-            Dim ma = sum / _period
-            If ma > 0 Then
-                r.Values("Value") = candles(i).Close / ma * 100.0F
+        Protected Overrides Function StepCandle(candle As CandleItem, index As Integer) As IndicatorResult
+            If _count < _period Then
+                _window((_head + _count) Mod _period) = candle.Close
+                _count += 1
+                _sum += candle.Close
             Else
-                r.Values("Value") = 100.0F
+                _sum += CDbl(candle.Close) - _window(_head)
+                _window(_head) = candle.Close
+                _head = (_head + 1) Mod _period
             End If
-            r.Values("MA") = ma
-            r.Values("Upper") = 105
-            r.Values("Baseline") = 100
-            r.Values("Lower") = 95
-            Return r
+            Dim ma = If(_count = _period, CSng(_sum / _period), Single.NaN)
+            Dim value = If(Single.IsNaN(ma), Single.NaN, If(ma > 0, candle.Close / ma * 100.0F, 100.0F))
+            Return MakeResult(index, value, ma)
+        End Function
+        Protected Overrides Sub SaveState()
+            _savedHead = _head : _savedCount = _count : _savedSum = _sum
+            If _count = _period Then _savedHeadValue = _window(_head)
+        End Sub
+        Protected Overrides Sub RestoreState()
+            _head = _savedHead : _count = _savedCount : _sum = _savedSum
+            If _count = _period Then _window(_head) = _savedHeadValue
+        End Sub
+        Private Sub ResetState()
+            _head = 0 : _count = 0 : _sum = 0
+            Array.Clear(_window, 0, _window.Length)
+            ResetIncrementalIndex()
+        End Sub
+        Private Function MakeResult(index As Integer, value As Single, ma As Single) As IndicatorResult
+            Return New IndicatorResult With {
+                .Name = Name, .Index = index, .PanelIndex = PanelIndex,
+                .Values = New Dictionary(Of String, Single) From {
+                    {"Value", value}, {"MA", ma}, {"Upper", 105.0F}, {"Baseline", 100.0F}, {"Lower", 95.0F}
+                },
+                .SeriesKinds = New Dictionary(Of String, SeriesKind) From {
+                    {"Value", SeriesKind.Line}, {"MA", SeriesKind.Meta}, {"Upper", SeriesKind.Baseline},
+                    {"Baseline", SeriesKind.Baseline}, {"Lower", SeriesKind.Baseline}
+                }
+            }
         End Function
     End Class
 End Namespace

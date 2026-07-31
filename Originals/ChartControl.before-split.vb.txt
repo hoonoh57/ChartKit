@@ -1,5 +1,6 @@
 ﻿Imports System.Linq
 Imports System.Windows.Forms
+'' Pre-partial-split snapshot preserved for behavioral comparison.
 Imports SkiaSharp
 Imports SkiaSharp.Views.Desktop
 Imports ChartKit.Abstractions
@@ -28,7 +29,12 @@ Namespace Core
 
         Private _mouseInside As Boolean = False
         Private WithEvents _frameTimer As Timer
+        Private WithEvents _stateSaveTimer As Timer
+        Private _isRestoringState As Boolean
         Private _needsRepaint As Boolean = True
+
+        Public Event VisibleCandleCountChanged As EventHandler(Of EventArgs)
+        Public Event CandleCountChanged As EventHandler(Of EventArgs)
 
         Private _mainRect As SKRect
         Private _volumeRect As SKRect
@@ -96,6 +102,20 @@ Namespace Core
             _frameTimer.Interval = FRAME_INTERVAL_MS
             _frameTimer.Enabled = True
             AddHandler _frameTimer.Tick, AddressOf OnFrameTimer
+
+            _stateSaveTimer = New Timer() With {.Interval = 500, .Enabled = False}
+            AddHandler _stateSaveTimer.Tick, AddressOf OnStateSaveTimer
+        End Sub
+
+        Private Sub ScheduleStateSave()
+            If _isRestoringState OrElse IsDisposed OrElse _stateSaveTimer Is Nothing Then Return
+            _stateSaveTimer.Stop()
+            _stateSaveTimer.Start()
+        End Sub
+
+        Private Sub OnStateSaveTimer(sender As Object, e As EventArgs)
+            _stateSaveTimer.Stop()
+            SaveState()
         End Sub
 
         Private _dataSource As ChartKit.Abstractions.ICandleDataSource
@@ -209,15 +229,12 @@ Namespace Core
         Private Sub ApplyAppendedCandle(candle As CandleItem)
             Dim wasLatestVisible = IsLatestCandleVisible()
             Dim oldestEvicted = _candles.Add(candle)
-            If oldestEvicted Then
-                '' 10만 봉 보존 한도에 도달한 경우에만 지표 인덱스를 새 head에 재정렬한다.
-                _indicatorEngine.CalculateAll(_candles)
-                _vs.StartIndex = Math.Max(0, _vs.StartIndex - 1)
-            Else
-                _indicatorEngine.UpdateLast(_candles)
-            End If
+            '' 캔들과 지표 결과가 함께 링버퍼에서 O(1) 이동하므로 전체 재계산하지 않는다.
+            _indicatorEngine.UpdateLast(_candles)
+            If oldestEvicted Then _vs.StartIndex = Math.Max(0, _vs.StartIndex - 1)
             If wasLatestVisible Then MoveToLatestVisible()
             _needsRepaint = True
+            RaiseEvent CandleCountChanged(Me, EventArgs.Empty)
         End Sub
 
         Private Sub ApplyUpdatedCandle(candle As CandleItem)
@@ -244,7 +261,39 @@ Namespace Core
             MoveToLatestVisible()
             _viewportInitialized = True
             _needsRepaint = True
+            RaiseVisibleCandleCountChanged()
+            RaiseEvent CandleCountChanged(Me, EventArgs.Empty)
         End Sub
+
+        '' 연속조회로 받은 과거 봉을 현재 첫 봉 앞에 병합한다.
+        '' 현재 보고 있던 봉의 화면 위치는 추가된 개수만큼 StartIndex를 이동해 유지한다.
+        Public Function PrependCandles(olderCandles As List(Of CandleItem)) As Integer
+            If olderCandles Is Nothing OrElse olderCandles.Count = 0 Then Return 0
+            Dim oldCount = CandleCount
+            Dim oldStart = _vs.StartIndex
+            Dim merged As New SortedDictionary(Of Long, CandleItem)
+            For Each candle In olderCandles
+                If candle IsNot Nothing Then merged(candle.Dt.Ticks) = candle
+            Next
+            For Each candle In _candles
+                If candle IsNot Nothing Then merged(candle.Dt.Ticks) = candle
+            Next
+            Dim capacity = Math.Max(CANDLE_RING_CAPACITY, merged.Count)
+            Dim replacement As New CandleRingBuffer(capacity)
+            For Each candle In merged.Values
+                replacement.Add(candle)
+            Next
+            _candles = replacement
+            Dim added = _candles.Count - oldCount
+            If added <= 0 Then Return 0
+            _indicatorEngine.CalculateAll(_candles)
+            _vs.StartIndex = Math.Min(Math.Max(0, _candles.Count - 1), oldStart + added)
+            _isAutoScaleY = True
+            _needsRepaint = True
+            ScheduleStateSave()
+            RaiseEvent CandleCountChanged(Me, EventArgs.Empty)
+            Return added
+        End Function
 
         Public ReadOnly Property CandleCount As Integer
             Get
@@ -252,16 +301,37 @@ Namespace Core
             End Get
         End Property
 
+        Public ReadOnly Property VisibleCandleCount As Integer
+            Get
+                If _candles Is Nothing OrElse _candles.Count = 0 Then Return 0
+                Return Math.Min(_vs.VisibleCount, _candles.Count)
+            End Get
+        End Property
+
+        Public Sub UpdateTheme(update As Action(Of ChartTheme))
+            If update Is Nothing Then Throw New ArgumentNullException(NameOf(update))
+            update(_theme)
+            _theme.Invalidate()
+            _needsRepaint = True
+        End Sub
+
         '' 툴바 등 외부 UI에서 화면에 표시할 봉 개수를 지정한다.
         Public Sub SetVisibleCandleCount(count As Integer)
             If _candles Is Nothing OrElse _candles.Count = 0 Then Return
             Dim safeCount = Math.Max(1, Math.Min(count, _candles.Count))
             Dim chartWidth = Math.Max(1.0F, CSng(_sk.ClientSize.Width) - MARGIN_LEFT - MARGIN_RIGHT)
+            Dim pitch = chartWidth / safeCount
             _vs.VisibleCount = safeCount
-            _vs.CandleWidth = Math.Max(0.5F, (chartWidth / (safeCount + GetDefaultRightPaddingBars())) - _vs.Gap)
+            _vs.Gap = Math.Min(DEFAULT_INITIAL_GAP, Math.Max(0.0F, pitch * 0.15F))
+            _vs.CandleWidth = Math.Max(0.1F, pitch - _vs.Gap)
             MoveToLatestVisible()
             _isAutoScaleY = True
             _needsRepaint = True
+            RaiseVisibleCandleCountChanged()
+        End Sub
+
+        Private Sub RaiseVisibleCandleCountChanged()
+            RaiseEvent VisibleCandleCountChanged(Me, EventArgs.Empty)
         End Sub
 
         '' 로드된 데이터 안에서 지정 거래일의 첫 캔들로 이동한다.
@@ -293,6 +363,7 @@ Namespace Core
                 _indicatorEngine.CalculateAll(_candles)
             End If
             _needsRepaint = True
+            ScheduleStateSave()
         End Sub
 
         '' ===== 지표 조회/삭제/파라미터 변경 API =====
@@ -306,11 +377,13 @@ Namespace Core
                 _indicatorEngine.CalculateAll(_candles)
             End If
             _needsRepaint = True
+            ScheduleStateSave()
         End Sub
 
         Public Sub ClearIndicators()
             _indicatorEngine.Clear()
             _needsRepaint = True
+            ScheduleStateSave()
         End Sub
 
         '' ===== 컨텍스트 메뉴 =====
@@ -390,6 +463,7 @@ Namespace Core
                                     _panelBaselines(slotRef) = New List(Of Single)()
                                 End If
                                 _panelBaselines(slotRef).Add(v)
+                                ScheduleStateSave()
                                 Invalidate()
                             End If
                         End If
@@ -398,6 +472,7 @@ Namespace Core
                 Dim clearItem = baseMenu.DropDownItems.Add("이 패널 기준선 모두 지우기", Nothing,
                     Sub(s, ev)
                         _panelBaselines.Remove(slotRef)
+                        ScheduleStateSave()
                         Invalidate()
                     End Sub)
                 clearItem.Enabled = hasAny
@@ -419,6 +494,7 @@ Namespace Core
                             If Single.TryParse(inp.Trim(), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, v) Then
                                 If Not _panelZones.ContainsKey(zslot) Then _panelZones(zslot) = New ChartKit.Core.PanelZoneState()
                                 _panelZones(zslot).OverValue = v
+                                ScheduleStateSave()
                                 Invalidate()
                             End If
                         End If
@@ -431,6 +507,7 @@ Namespace Core
                             If Single.TryParse(inp.Trim(), Globalization.NumberStyles.Float, Globalization.CultureInfo.InvariantCulture, v) Then
                                 If Not _panelZones.ContainsKey(zslot) Then _panelZones(zslot) = New ChartKit.Core.PanelZoneState()
                                 _panelZones(zslot).UnderValue = v
+                                ScheduleStateSave()
                                 Invalidate()
                             End If
                         End If
@@ -439,6 +516,7 @@ Namespace Core
                 Dim clearZone = zoneMenu.DropDownItems.Add("이 패널 음영 지우기", Nothing,
                     Sub(s, ev)
                         _panelZones.Remove(zslot)
+                        ScheduleStateSave()
                         Invalidate()
                     End Sub)
                 clearZone.Enabled = hasZone
@@ -464,12 +542,14 @@ Namespace Core
                             Sub(s, ev)
                                 _shadeRules.Add(New ChartKit.Core.OverlayShadeRule With {
                                     .IndicatorA = aName, .IndicatorB = bName})
+                                ScheduleStateSave()
                                 Invalidate()
                             End Sub)
                         aSub.DropDownItems.Add(aDisp & " >= " & indB.DisplayName & "  (B상승중만)", Nothing,
                             Sub(s, ev)
                                 _shadeRules.Add(New ChartKit.Core.OverlayShadeRule With {
                                     .IndicatorA = aName, .IndicatorB = bName, .RequireBRising = True})
+                                ScheduleStateSave()
                                 Invalidate()
                             End Sub)
                     Next
@@ -480,6 +560,7 @@ Namespace Core
             Dim clearShade = shadeMenu.DropDownItems.Add("모든 음영 규칙 지우기", Nothing,
                 Sub(s, ev)
                     _shadeRules.Clear()
+                    ScheduleStateSave()
                     Invalidate()
                 End Sub)
             clearShade.Enabled = (_shadeRules.Count > 0)
@@ -504,16 +585,19 @@ Namespace Core
                         aSub.DropDownItems.Add(aDisp & " ▲상향돌파 " & bDisp, Nothing,
                             Sub(s, ev)
                                 _signalRules.Add(New ChartKit.Core.SignalRule With {.IndicatorA = aName, .IndicatorB = bName, .CrossUp = True})
+                                ScheduleStateSave()
                                 Invalidate()
                             End Sub)
                             aSub.DropDownItems.Add(aDisp & " ▲상향돌파 " & bDisp & "  (B상승중만)", Nothing,
                             Sub(s, ev)
                                 _signalRules.Add(New ChartKit.Core.SignalRule With {.IndicatorA = aName, .IndicatorB = bName, .CrossUp = True, .RequireBRising = True})
+                                ScheduleStateSave()
                                 Invalidate()
                             End Sub)
                         aSub.DropDownItems.Add(aDisp & " ▼하향돌파 " & bDisp, Nothing,
                             Sub(s, ev)
                                 _signalRules.Add(New ChartKit.Core.SignalRule With {.IndicatorA = aName, .IndicatorB = bName, .CrossUp = False})
+                                ScheduleStateSave()
                                 Invalidate()
                             End Sub)
                     Next
@@ -524,25 +608,27 @@ Namespace Core
             '' ── 등록된 신호 규칙 속성 편집 (PropertyGrid) ──
             If _signalRules.Count > 0 Then
                 Dim sigEditMenu As New ToolStripMenuItem("신호 규칙 편집(속성)...")
-                For si = 0 To _signalRules.Count - 1
-                    Dim idxLocal = si
-                    Dim r = _signalRules(si)
+                For Each r In _signalRules.ToList()
+                    Dim ruleId = r.Id
                     sigEditMenu.DropDownItems.Add(r.ToString(), Nothing,
                         Sub(s, ev)
-                            Using dlg As New ChartKit.UI.SignalPropertyDialog(_signalRules(idxLocal))
+                            Dim target = _signalRules.FirstOrDefault(Function(rule) rule.Id = ruleId)
+                            If target Is Nothing Then Return
+                            Using dlg As New ChartKit.UI.SignalPropertyDialog(target)
                                 If dlg.ShowDialog(Me) = System.Windows.Forms.DialogResult.OK Then
+                                    ScheduleStateSave()
                                     Invalidate()
                                 End If
                             End Using
                         End Sub)
                 Next
                 Dim sigDelMenu As New ToolStripMenuItem("신호 규칙 삭제")
-                For si = 0 To _signalRules.Count - 1
-                    Dim idxLocal = si
-                    Dim r = _signalRules(si)
+                For Each r In _signalRules.ToList()
+                    Dim ruleId = r.Id
                     sigDelMenu.DropDownItems.Add(r.ToString(), Nothing,
                         Sub(s, ev)
-                            _signalRules.RemoveAt(idxLocal)
+                            _signalRules.RemoveAll(Function(rule) rule.Id = ruleId)
+                            ScheduleStateSave()
                             Invalidate()
                         End Sub)
                 Next
@@ -553,6 +639,7 @@ Namespace Core
             Dim clearSig = sigMenu.DropDownItems.Add("모든 신호 지우기", Nothing,
                 Sub(s, ev)
                     _signalRules.Clear()
+                    ScheduleStateSave()
                     Invalidate()
                 End Sub)
             clearSig.Enabled = (_signalRules.Count > 0)
@@ -575,14 +662,17 @@ Namespace Core
             Dim pOpen As New ToolStripMenuItem("시가대비") With {.Checked = (_pctAxisMode = 2)}
             AddHandler pOff.Click, Sub(s, ev)
                                        _pctAxisMode = 0
+                                       ScheduleStateSave()
                                        Invalidate()
                                    End Sub
             AddHandler pPrev.Click, Sub(s, ev)
                                         _pctAxisMode = 1
+                                        ScheduleStateSave()
                                         Invalidate()
                                     End Sub
             AddHandler pOpen.Click, Sub(s, ev)
                                         _pctAxisMode = 2
+                                        ScheduleStateSave()
                                         Invalidate()
                                     End Sub
             pctMenu.DropDownItems.Add(pOff)
@@ -610,6 +700,7 @@ Namespace Core
                 Sub(s, ev)
                     _registry.Toggle(layerId, Not _registry.IsLayerVisible(layerId))
                     _needsRepaint = True
+                    ScheduleStateSave()
                 End Sub
             parent.DropDownItems.Add(item)
         End Sub
@@ -653,6 +744,7 @@ Namespace Core
                 _indicatorEngine.CalculateAll(_candles)
             End If
             _needsRepaint = True
+            ScheduleStateSave()
         End Sub
 
         Private Sub OnFrameTimer(sender As Object, e As EventArgs)
@@ -765,10 +857,12 @@ Namespace Core
 
         Private Sub OnGLMouseUp(sender As Object, e As MouseEventArgs)
             If e.Button = MouseButtons.Left Then
+                Dim stateChanged = _isDragging OrElse _isPanelResizing OrElse _isDraggingPrice
                 _isDragging = False
                 _isPanelResizing = False
                 _resizePanelSlot = -1
                 _isDraggingPrice = False
+                If stateChanged Then ScheduleStateSave()
             End If
         End Sub
 
@@ -776,6 +870,7 @@ Namespace Core
         Private Sub OnGLDoubleClick(sender As Object, e As MouseEventArgs) Handles _sk.MouseDoubleClick
             _isAutoScaleY = True
             _needsRepaint = True
+            ScheduleStateSave()
         End Sub
 
         '' ===== 원본 휠 줌 (커서 위치 봉 고정) =====
@@ -783,7 +878,7 @@ Namespace Core
             Dim latestVisible = IsLatestCandleVisible()
             Dim zoom = If(e.Delta > 0, 1.2F, 0.8F)
             _vs.CandleWidth *= zoom
-            If _vs.CandleWidth < 1 Then _vs.CandleWidth = 1
+            If _vs.CandleWidth < 0.1F Then _vs.CandleWidth = 0.1F
             If _vs.CandleWidth > 50 Then _vs.CandleWidth = 50
 
             If _mainRect.Width <= 0 OrElse Single.IsNaN(_mainRect.Width) OrElse Single.IsInfinity(_mainRect.Width) Then
@@ -820,6 +915,8 @@ Namespace Core
             End If
 
             _needsRepaint = True
+            RaiseVisibleCandleCountChanged()
+            ScheduleStateSave()
         End Sub
 
         Private Sub OnGLMouseEnter(sender As Object, e As EventArgs)
@@ -848,14 +945,19 @@ Namespace Core
                 Case Keys.Add, Keys.Oemplus
                     _vs.CandleWidth *= 1.2F
                     _vs.VisibleCount = CInt(_mainRect.Width / (_vs.CandleWidth + _vs.Gap))
+                    RaiseVisibleCandleCountChanged()
                 Case Keys.Subtract, Keys.OemMinus
                     _vs.CandleWidth *= 0.8F
                     _vs.VisibleCount = CInt(_mainRect.Width / (_vs.CandleWidth + _vs.Gap))
+                    RaiseVisibleCandleCountChanged()
                 Case Keys.A
                     If e.Control AndAlso _candles.Count > 0 Then
                         _vs.StartIndex = 0
                         _vs.VisibleCount = _candles.Count
-                        _vs.CandleWidth = Math.Max(0.5F, (_mainRect.Width / (_vs.VisibleCount + 5)) - _vs.Gap)
+                        Dim pitch = _mainRect.Width / _vs.VisibleCount
+                        _vs.Gap = Math.Min(DEFAULT_INITIAL_GAP, Math.Max(0.0F, pitch * 0.15F))
+                        _vs.CandleWidth = Math.Max(0.1F, pitch - _vs.Gap)
+                        RaiseVisibleCandleCountChanged()
                     End If
                 Case Keys.C
                     _vs.ShowCrosshair = Not _vs.ShowCrosshair
@@ -874,6 +976,7 @@ Namespace Core
             End Select
             _needsRepaint = True
             e.Handled = True
+            ScheduleStateSave()
         End Sub
 
         '' ===== 마우스 핸들러용 XToIndex (원본 공식, mapper 비의존) =====
@@ -894,11 +997,12 @@ Namespace Core
             Dim newVisibleCount = Math.Max(1, CInt(Math.Truncate(chartWidth / denom)))
             KeepLatestVisibleForNewVisibleCount(newVisibleCount)
             _needsRepaint = True
+            RaiseVisibleCandleCountChanged()
         End Sub
 
         '' ===== 뷰포트 함수 묶음 (원본 그대로) =====
         Private Sub MoveToLatestVisible()
-            _vs.StartIndex = GetLatestStartIndex() + GetDefaultRightPaddingBars()
+            _vs.StartIndex = GetLatestStartIndex()
         End Sub
         Private Function GetLatestStartIndex() As Integer
             Return GetLatestStartIndexForVisibleCount(_vs.VisibleCount)
@@ -1077,6 +1181,7 @@ Namespace Core
                 .PanelBaselines = _panelBaselines,
                 .PanelZones = _panelZones,
                 .ShadeRules = _shadeRules, .SignalRules = _signalRules}
+            ctx.PanelScales = PanelScaleCalculator.Calculate(ctx)
 
             For Each layer In _registry.Ordered()
                 layer.Draw(canvas, ctx)
@@ -1096,6 +1201,13 @@ Namespace Core
                     _frameTimer.Dispose()
                     _frameTimer = Nothing
                 End If
+                If _stateSaveTimer IsNot Nothing Then
+                    If _stateSaveTimer.Enabled Then SaveState()
+                    _stateSaveTimer.Stop()
+                    _stateSaveTimer.Dispose()
+                    _stateSaveTimer = Nothing
+                End If
+                _registry.Dispose()
             End If
             MyBase.Dispose(disposing)
         End Sub
@@ -1153,7 +1265,7 @@ Namespace Core
             st.PctAxisMode = _pctAxisMode
             st.SignalRules = New List(Of ChartKit.Core.SignalRule)()
             For Each sg In _signalRules
-                st.SignalRules.Add(New ChartKit.Core.SignalRule With {.IndicatorA = sg.IndicatorA, .IndicatorB = sg.IndicatorB, .CrossUp = sg.CrossUp, .RequireBRising = sg.RequireBRising, .Side = sg.Side, .MarkerShape = sg.MarkerShape, .ColorArgb = sg.ColorArgb, .Name = sg.Name})
+                st.SignalRules.Add(New ChartKit.Core.SignalRule With {.Id = sg.Id, .IndicatorA = sg.IndicatorA, .IndicatorB = sg.IndicatorB, .CrossUp = sg.CrossUp, .RequireBRising = sg.RequireBRising, .Side = sg.Side, .MarkerShape = sg.MarkerShape, .ColorArgb = sg.ColorArgb, .Name = sg.Name})
             Next
             st.ShadeRules = New List(Of ChartKit.Core.OverlayShadeRule)()
             For Each sr In _shadeRules
@@ -1185,6 +1297,7 @@ Namespace Core
             Dim prof = If(profile, StateProfile)
             Dim st = ChartState.Load(prof)
             If st Is Nothing Then Return
+            _isRestoringState = True
 
             '' 사용자 편집 기준선 복원
             _panelBaselines.Clear()
@@ -1220,6 +1333,22 @@ Namespace Core
                 Next
             End If
 
+            _signalRules.Clear()
+            If st.SignalRules IsNot Nothing Then
+                For Each signal In st.SignalRules
+                    If signal Is Nothing Then Continue For
+                    Dim restoredId = If(String.IsNullOrWhiteSpace(signal.Id),
+                                        Guid.NewGuid().ToString("N"), signal.Id)
+                    _signalRules.Add(New SignalRule With {
+                        .Id = restoredId, .Name = signal.Name,
+                        .IndicatorA = signal.IndicatorA, .IndicatorB = signal.IndicatorB,
+                        .CrossUp = signal.CrossUp, .RequireBRising = signal.RequireBRising,
+                        .Side = signal.Side, .MarkerShape = signal.MarkerShape,
+                        .ColorArgb = signal.ColorArgb
+                    })
+                Next
+            End If
+
             '' ── 지표 복원 : 기존 전부 제거 후 재생성 ──
             For Each existing In _indicatorEngine.GetAll().ToList()
                 _indicatorEngine.Remove(existing.Name)
@@ -1230,7 +1359,7 @@ Namespace Core
                     Try
                         If String.IsNullOrWhiteSpace(isr.TypeName) Then Continue For
                         Dim t = Type.GetType(isr.TypeName)
-                        Console.WriteLine("[Restore] TypeName=" & isr.TypeName & " -> " & If(t Is Nothing, "NULL(못찾음)", t.FullName))
+                        ChartLog.Info("[Restore] TypeName=" & isr.TypeName & " -> " & If(t Is Nothing, "NULL(못찾음)", t.FullName))
                         If t Is Nothing Then Continue For
                         Dim obj = CreateWithOptionalCtor(t)
                         Dim ind = TryCast(obj, ChartKit.Abstractions.IIndicator)
@@ -1249,7 +1378,7 @@ Namespace Core
                         End If
                         _indicatorEngine.Register(ind)
                     Catch ex As Exception
-                        Console.WriteLine("[Restore] 지표 복원 예외: " & ex.GetType().Name & " : " & ex.Message)
+                        ChartLog.Warning("[Restore] 지표 복원 예외", ex)
                     End Try
                 Next
             End If
@@ -1278,14 +1407,15 @@ Namespace Core
                 Next
             End If
 
-            Console.WriteLine("[Restore] indicators restored = " & _indicatorEngine.GetAll().Count)
-            Console.WriteLine("[Restore] candles = " & If(_candles Is Nothing, 0, _candles.Count) & ", saved CandleCount = " & st.CandleCount)
-            Console.WriteLine("[Restore] StartIndex = " & _vs.StartIndex & ", CandleWidth = " & _vs.CandleWidth)
+            ChartLog.Info("[Restore] indicators restored = " & _indicatorEngine.GetAll().Count)
+            ChartLog.Info("[Restore] candles = " & If(_candles Is Nothing, 0, _candles.Count) & ", saved CandleCount = " & st.CandleCount)
+            ChartLog.Info("[Restore] StartIndex = " & _vs.StartIndex & ", CandleWidth = " & _vs.CandleWidth)
             For Each ind In _indicatorEngine.GetAll()
-                Console.WriteLine("   ind: " & ind.Name & " panel=" & ind.PanelIndex)
+                ChartLog.Info("   ind: " & ind.Name & " panel=" & ind.PanelIndex)
             Next
 
             _needsRepaint = True
+            _isRestoringState = False
         End Sub
 
         '' template 값의 타입에 맞춰 문자열을 변환
@@ -1295,7 +1425,8 @@ Namespace Core
                 If TypeOf template Is Single Then Return Single.Parse(s, Globalization.CultureInfo.InvariantCulture)
                 If TypeOf template Is Double Then Return Double.Parse(s, Globalization.CultureInfo.InvariantCulture)
                 If TypeOf template Is Boolean Then Return Boolean.Parse(s)
-            Catch
+            Catch ex As Exception
+                ChartLog.Warning($"지표 파라미터 변환 실패: '{s}'", ex)
             End Try
             Return s
         End Function
@@ -1345,7 +1476,7 @@ Namespace Core
         '' 지표별 컬럼 키 수집: "{지표명}.{값키}"
         Dim indCols As New List(Of Tuple(Of String, String))  '' (지표명, 값키)
         For Each ind In inds
-            Dim rlist As List(Of ChartKit.Abstractions.IndicatorResult) = Nothing
+            Dim rlist As ChartKit.Models.IndicatorResultRingBuffer = Nothing
             If res.TryGetValue(ind.Name, rlist) AndAlso rlist IsNot Nothing AndAlso rlist.Count > 0 Then
                 '' 첫 non-null 결과에서 키 목록 확보
                 Dim sample = rlist.FirstOrDefault(Function(x) x IsNot Nothing AndAlso x.Values IsNot Nothing AndAlso x.Values.Count > 0)
@@ -1372,7 +1503,7 @@ Namespace Core
 
         '' 지표 값 조회 헬퍼 (인덱스 정렬 가정: rlist(i).Index == i)
         Dim getVal = Function(indName As String, key As String, i As Integer) As Single
-                         Dim rlist As List(Of ChartKit.Abstractions.IndicatorResult) = Nothing
+                         Dim rlist As ChartKit.Models.IndicatorResultRingBuffer = Nothing
                          If Not res.TryGetValue(indName, rlist) Then Return Single.NaN
                          If rlist Is Nothing OrElse i < 0 OrElse i >= rlist.Count Then Return Single.NaN
                          Dim rr = rlist(i)
@@ -1384,7 +1515,7 @@ Namespace Core
 
         '' "Value" 우선 조회 (신호 판정용, ValAt 과 동일 규칙)
         Dim valOf = Function(indName As String, i As Integer) As Single
-                        Dim rlist As List(Of ChartKit.Abstractions.IndicatorResult) = Nothing
+                        Dim rlist As ChartKit.Models.IndicatorResultRingBuffer = Nothing
                         If Not res.TryGetValue(indName, rlist) Then Return Single.NaN
                         If rlist Is Nothing OrElse i < 0 OrElse i >= rlist.Count Then Return Single.NaN
                         Dim rr = rlist(i)

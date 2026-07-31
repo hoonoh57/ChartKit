@@ -26,14 +26,17 @@ Namespace Layers
         Private _zeroLine As SKPaint
         Private _text As SKPaint
         Private _bg As SKPaint
+        Private _paintThemeVersion As Integer = -1
 
         Private Sub EnsurePaints(t As ChartTheme)
-            If _text IsNot Nothing Then Return
+            If _text IsNot Nothing AndAlso _paintThemeVersion = t.Version Then Return
+            DisposePaints()
             _line = New SKPaint With {.Style = SKPaintStyle.Stroke, .Color = New SKColor(110, 120, 145, 90), .StrokeWidth = 1, .IsAntialias = False}
             _line.PathEffect = SKPathEffect.CreateDash({3, 3}, 0)
             _zeroLine = New SKPaint With {.Style = SKPaintStyle.Stroke, .Color = New SKColor(180, 190, 210, 200), .StrokeWidth = 1, .IsAntialias = False}
             _text = New SKPaint With {.Color = t.AxisText, .TextSize = t.AxisFontSize, .IsAntialias = True, .Typeface = SKTypeface.FromFamilyName("Consolas"), .TextAlign = SKTextAlign.Left}
             _bg = New SKPaint With {.Style = SKPaintStyle.Fill, .Color = New SKColor(20, 24, 34, 190), .IsAntialias = False}
+            _paintThemeVersion = t.Version
         End Sub
 
         '' 기준가 계산. 못 구하면 NaN.
@@ -125,6 +128,17 @@ Namespace Layers
             Dim mw = _text.MeasureText(modeLbl)
             canvas.DrawRect(New SKRect(rect.Left + 1, rect.Top + 1, rect.Left + mw + 6, rect.Top + 15), _bg)
             canvas.DrawText(modeLbl, rect.Left + 3, rect.Top + 12, _text)
+        End Sub
+
+        Private Sub DisposePaints()
+            _line?.Dispose() : _line = Nothing
+            _zeroLine?.Dispose() : _zeroLine = Nothing
+            _text?.Dispose() : _text = Nothing
+            _bg?.Dispose() : _bg = Nothing
+        End Sub
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            DisposePaints()
         End Sub
     End Class
 End Namespace

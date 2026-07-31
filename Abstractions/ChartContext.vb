@@ -21,6 +21,7 @@ Namespace Abstractions
         Public Property VolumeMax As Long
         Public Property ShowDayChangeLines As Boolean = True
         Public Property Engine As ChartKit.Core.IndicatorEngine
+        Public Property PanelScales As Dictionary(Of Integer, ChartKit.Core.PanelScale)
 
         '' ── 사용자 편집 기준선: key=서브패널 인덱스(0=첫 서브패널, PanelIndex-1), value=기준선 값 목록 ──
         Public Property PanelBaselines As System.Collections.Generic.Dictionary(Of Integer, System.Collections.Generic.List(Of Single))
@@ -29,6 +30,8 @@ Namespace Abstractions
         '' 오버레이 배경 음영 규칙 (A>=B 구간)
         Public Property ShadeRules As System.Collections.Generic.List(Of ChartKit.Core.OverlayShadeRule)
         Public Property SignalRules As System.Collections.Generic.List(Of ChartKit.Core.SignalRule)
+        Public Property StrategyCapture As ChartKit.Core.Strategies.StrategyCapture
+        Public Property StrategyReentryOptions As ChartKit.Core.Strategies.StrategyReentryLockOptions
 
         '' ── 서브패널 영역 (PanelIndex>0 지표용, 인덱스 0=첫 서브패널) ──
         Public Property PanelRects As System.Collections.Generic.List(Of SkiaSharp.SKRect)

@@ -6,6 +6,7 @@
     <RootNamespace>ChartKit</RootNamespace>
     <StartupObject>ChartKit.DemoProgram</StartupObject>
     <Nullable>disable</Nullable>
+    <OptionStrict>On</OptionStrict>
   </PropertyGroup>
   <ItemGroup>
     <!-- 원본 참조 파일: 읽기용으로 보관하되 컴파일에서 제외 -->

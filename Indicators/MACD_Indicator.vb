@@ -1,140 +1,177 @@
-﻿Imports ChartKit.Abstractions
+Imports ChartKit.Abstractions
 Imports ChartKit.Models
 
 Namespace Indicators
-    '' MACD = EMA(fast) - EMA(slow), Signal = EMA(signal) of MACD, Hist = MACD - Signal.
-    ''  Values: "MACD"(주선), "Signal"(시그널), "Hist"(히스토그램=MACD-Signal)
+    '' MACD = EMA(fast) - EMA(slow), Signal = EMA(signal) of MACD.
     Public Class MACD_Indicator
-        Implements IIndicator
+        Inherits IncrementalIndicatorBase
 
         Private _fast As Integer = 12
         Private _slow As Integer = 26
         Private _signal As Integer = 9
         Private _params As New Dictionary(Of String, Object) From {{"Fast", 12}, {"Slow", 26}, {"Signal", 9}}
 
+        Private _closeCount As Integer
+        Private _fastSeedSum As Double
+        Private _slowSeedSum As Double
+        Private _fastEma As Single = Single.NaN
+        Private _slowEma As Single = Single.NaN
+        Private _signalCount As Integer
+        Private _signalSeedSum As Double
+        Private _signalEma As Single = Single.NaN
+
+        Private _savedCloseCount As Integer
+        Private _savedFastSeedSum As Double
+        Private _savedSlowSeedSum As Double
+        Private _savedFastEma As Single
+        Private _savedSlowEma As Single
+        Private _savedSignalCount As Integer
+        Private _savedSignalSeedSum As Double
+        Private _savedSignalEma As Single
+
         Public Sub New(Optional fast As Integer = 12, Optional slow As Integer = 26, Optional signal As Integer = 9)
-            _fast = fast
-            _slow = slow
-            _signal = signal
-            _params("Fast") = _fast
-            _params("Slow") = _slow
-            _params("Signal") = _signal
+            SetPeriods(fast, slow, signal)
         End Sub
 
-        Public ReadOnly Property Name As String Implements IIndicator.Name
+        Public Overrides ReadOnly Property Name As String
             Get
                 Return $"MACD_{_fast}_{_slow}_{_signal}"
             End Get
         End Property
-        Public ReadOnly Property DisplayName As String Implements IIndicator.DisplayName
+
+        Public Overrides ReadOnly Property DisplayName As String
             Get
                 Return $"MACD({_fast},{_slow},{_signal})"
             End Get
         End Property
-        Public ReadOnly Property PanelIndex As Integer Implements IIndicator.PanelIndex
+
+        Public Overrides ReadOnly Property PanelIndex As Integer
             Get
                 Return 7
             End Get
         End Property
-        Public Property Parameters As Dictionary(Of String, Object) Implements IIndicator.Parameters
+
+        Public Overrides Property Parameters As Dictionary(Of String, Object)
             Get
                 Return _params
             End Get
             Set(value As Dictionary(Of String, Object))
-                _params = value
-                If _params.ContainsKey("Fast") Then _fast = CInt(_params("Fast"))
-                If _params.ContainsKey("Slow") Then _slow = CInt(_params("Slow"))
-                If _params.ContainsKey("Signal") Then _signal = CInt(_params("Signal"))
+                _params = If(value, New Dictionary(Of String, Object))
+                SetPeriods(
+                    If(_params.ContainsKey("Fast"), Convert.ToInt32(_params("Fast")), _fast),
+                    If(_params.ContainsKey("Slow"), Convert.ToInt32(_params("Slow")), _slow),
+                    If(_params.ContainsKey("Signal"), Convert.ToInt32(_params("Signal")), _signal))
             End Set
         End Property
 
-        '' 종가 EMA. i < period-1 은 NaN, i = period-1 은 SMA seed, 이후 EMA.
-        Private Shared Sub CloseEma(candles As IReadOnlyList(Of CandleItem), period As Integer, dst() As Single, count As Integer)
-            Dim k As Single = 2.0F / (period + 1)
-            For i = 0 To count - 1
-                If i < period - 1 Then
-                    dst(i) = Single.NaN
-                ElseIf i = period - 1 Then
-                    Dim s As Single = 0
-                    For j = 0 To period - 1
-                        s += candles(j).Close
-                    Next
-                    dst(i) = s / period
-                Else
-                    dst(i) = candles(i).Close * k + dst(i - 1) * (1 - k)
-                End If
-            Next
+        Private Sub SetPeriods(fast As Integer, slow As Integer, signal As Integer)
+            _fast = Math.Max(1, fast)
+            _slow = Math.Max(_fast + 1, slow)
+            _signal = Math.Max(1, signal)
+            _params("Fast") = _fast
+            _params("Slow") = _slow
+            _params("Signal") = _signal
+            ResetState()
         End Sub
 
-        '' 배열 src(유효값은 NaN 아님)에 대한 EMA. 유효값 period개째에 SMA seed.
-        Private Shared Sub SeriesEma(src() As Single, period As Integer, dst() As Single, count As Integer)
-            Dim k As Single = 2.0F / (period + 1)
-            Dim seeded As Boolean = False
-            Dim seedBuf As New List(Of Single)()
-            For i = 0 To count - 1
-                dst(i) = Single.NaN
-                Dim v = src(i)
-                If Single.IsNaN(v) Then Continue For
-                If Not seeded Then
-                    seedBuf.Add(v)
-                    If seedBuf.Count = period Then
-                        Dim s As Single = 0
-                        For Each x In seedBuf : s += x : Next
-                        dst(i) = s / period
-                        seeded = True
-                    End If
-                Else
-                    dst(i) = v * k + dst(i - 1) * (1 - k)
-                End If
+        Public Overrides Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult)
+            Dim results As New List(Of IndicatorResult)(candles.Count)
+            ResetState()
+            For i = 0 To candles.Count - 1
+                If i = candles.Count - 1 Then SaveState()
+                results.Add(StepCandle(candles(i), i))
             Next
-        End Sub
-
-        Public Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult) Implements IIndicator.Calculate
-            Dim count = candles.Count
-            Dim results As New List(Of IndicatorResult)(count)
-            If count = 0 Then Return results
-
-            Dim emaFast(count - 1) As Single
-            Dim emaSlow(count - 1) As Single
-            CloseEma(candles, _fast, emaFast, count)
-            CloseEma(candles, _slow, emaSlow, count)
-
-            Dim macd(count - 1) As Single
-            For i = 0 To count - 1
-                If Single.IsNaN(emaFast(i)) OrElse Single.IsNaN(emaSlow(i)) Then
-                    macd(i) = Single.NaN
-                Else
-                    macd(i) = emaFast(i) - emaSlow(i)
-                End If
-            Next
-
-            Dim signal(count - 1) As Single
-            SeriesEma(macd, _signal, signal, count)
-
-            For i = 0 To count - 1
-                Dim r As New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = PanelIndex,
-                    .Values = New Dictionary(Of String, Single)}
-                r.Values("MACD") = macd(i)
-                r.Values("Signal") = signal(i)
-                If Single.IsNaN(macd(i)) OrElse Single.IsNaN(signal(i)) Then
-                    r.Values("Hist") = Single.NaN
-                Else
-                    r.Values("Hist") = macd(i) - signal(i)
-                End If
-                results.Add(r)
-            Next
+            Dim ring = TryCast(candles, CandleRingBuffer)
+            InitializeIncrementalSequence(If(ring Is Nothing, candles.Count - 1L, ring.LastSequence))
             Return results
         End Function
 
-        Public Function UpdateLast(candles As IReadOnlyList(Of CandleItem), prevResults As List(Of IndicatorResult)) As IndicatorResult Implements IIndicator.UpdateLast
-            Dim full = Calculate(candles)
-            If full.Count > 0 Then Return full(full.Count - 1)
-            Dim r As New IndicatorResult With {.Name = Name, .Index = candles.Count - 1, .PanelIndex = PanelIndex,
-                .Values = New Dictionary(Of String, Single)}
-            r.Values("MACD") = Single.NaN
-            r.Values("Signal") = Single.NaN
-            r.Values("Hist") = Single.NaN
-            Return r
+        Protected Overrides Function StepCandle(candle As CandleItem, index As Integer) As IndicatorResult
+            _closeCount += 1
+            _fastEma = StepCloseEma(candle.Close, _fast, _closeCount, _fastSeedSum, _fastEma)
+            _slowEma = StepCloseEma(candle.Close, _slow, _closeCount, _slowSeedSum, _slowEma)
+
+            Dim macd = Single.NaN
+            If Not Single.IsNaN(_fastEma) AndAlso Not Single.IsNaN(_slowEma) Then
+                macd = _fastEma - _slowEma
+            End If
+
+            Dim signalValue = Single.NaN
+            If Not Single.IsNaN(macd) Then
+                _signalCount += 1
+                If _signalCount < _signal Then
+                    _signalSeedSum += macd
+                ElseIf _signalCount = _signal Then
+                    _signalSeedSum += macd
+                    _signalEma = CSng(_signalSeedSum / _signal)
+                    signalValue = _signalEma
+                Else
+                    Dim factor = 2.0F / (_signal + 1)
+                    _signalEma = macd * factor + _signalEma * (1.0F - factor)
+                    signalValue = _signalEma
+                End If
+            End If
+
+            Dim histogram = If(Single.IsNaN(macd) OrElse Single.IsNaN(signalValue),
+                               Single.NaN, macd - signalValue)
+            Return New IndicatorResult With {
+                .Name = Name, .Index = index, .PanelIndex = PanelIndex,
+                .Values = New Dictionary(Of String, Single) From {
+                    {"MACD", macd}, {"Signal", signalValue}, {"Hist", histogram}
+                },
+                .SeriesKinds = New Dictionary(Of String, SeriesKind) From {
+                    {"MACD", SeriesKind.Line}, {"Signal", SeriesKind.Line},
+                    {"Hist", SeriesKind.Histogram}
+                }
+            }
         End Function
+
+        Private Shared Function StepCloseEma(close As Single, period As Integer, count As Integer,
+                                             ByRef seedSum As Double, current As Single) As Single
+            If count < period Then
+                seedSum += close
+                Return Single.NaN
+            End If
+            If count = period Then
+                seedSum += close
+                Return CSng(seedSum / period)
+            End If
+            Dim factor = 2.0F / (period + 1)
+            Return close * factor + current * (1.0F - factor)
+        End Function
+
+        Protected Overrides Sub SaveState()
+            _savedCloseCount = _closeCount
+            _savedFastSeedSum = _fastSeedSum
+            _savedSlowSeedSum = _slowSeedSum
+            _savedFastEma = _fastEma
+            _savedSlowEma = _slowEma
+            _savedSignalCount = _signalCount
+            _savedSignalSeedSum = _signalSeedSum
+            _savedSignalEma = _signalEma
+        End Sub
+
+        Protected Overrides Sub RestoreState()
+            _closeCount = _savedCloseCount
+            _fastSeedSum = _savedFastSeedSum
+            _slowSeedSum = _savedSlowSeedSum
+            _fastEma = _savedFastEma
+            _slowEma = _savedSlowEma
+            _signalCount = _savedSignalCount
+            _signalSeedSum = _savedSignalSeedSum
+            _signalEma = _savedSignalEma
+        End Sub
+
+        Private Sub ResetState()
+            _closeCount = 0
+            _fastSeedSum = 0
+            _slowSeedSum = 0
+            _fastEma = Single.NaN
+            _slowEma = Single.NaN
+            _signalCount = 0
+            _signalSeedSum = 0
+            _signalEma = Single.NaN
+            ResetIncrementalIndex()
+        End Sub
     End Class
 End Namespace

@@ -3,6 +3,17 @@
 Namespace Abstractions
     '' 색상/여백 테마. 향후 테마 교체 대비하여 객체로 유지.
     Public Class ChartTheme
+        Private Shared _nextVersion As Integer
+        Private _version As Integer = Threading.Interlocked.Increment(_nextVersion)
+        Public ReadOnly Property Version As Integer
+            Get
+                Return _version
+            End Get
+        End Property
+
+        Public Sub Invalidate()
+            _version = Threading.Interlocked.Increment(_nextVersion)
+        End Sub
         Public Property MarginLeft As Single = 10
         Public Property MarginRight As Single = 80
         Public Property MarginTop As Single = 6

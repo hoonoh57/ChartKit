@@ -1,276 +1,132 @@
-﻿Imports ChartKit.Abstractions
+Imports ChartKit.Abstractions
 Imports ChartKit.Models
 
 Namespace Indicators
-    '' SuperTrend_Indicator — ATR 기반 추세 추종. 오버레이(방향색). 원본 로직 그대로.
     Public Class SuperTrend_Indicator
-        Implements IIndicator
+        Inherits IncrementalIndicatorBase
 
-        Private _atrPeriod As Integer = 10
-        Private _multiplier As Single = 3.0F
-        Private _params As New Dictionary(Of String, Object) From {{"AtrPeriod", 10}, {"Multiplier", 3.0F}}
-        Private _stateATR As Single = Single.NaN
-        Private _stateUpperBand As Single = Single.NaN
-        Private _stateLowerBand As Single = Single.NaN
-        Private _stateSuperTrend As Single = Single.NaN
-        Private _stateDirection As Integer = 1
-        Private _prevStateATR As Single = Single.NaN
-        Private _prevStateUpperBand As Single = Single.NaN
-        Private _prevStateLowerBand As Single = Single.NaN
-        Private _prevStateSuperTrend As Single = Single.NaN
-        Private _prevStateDirection As Integer = 1
-        Private _stateIndex As Integer = -1
+        Private _atrPeriod As Integer
+        Private _multiplier As Single
+        Private _params As Dictionary(Of String, Object)
+        Private _previousClose, _atr, _upper, _lower, _superTrend As Single
+        Private _trSum As Double
+        Private _count, _direction As Integer
+        Private _hasPrevious As Boolean
+
+        Private _savedPreviousClose, _savedAtr, _savedUpper, _savedLower, _savedSuperTrend As Single
+        Private _savedTrSum As Double
+        Private _savedCount, _savedDirection As Integer
+        Private _savedHasPrevious As Boolean
 
         Public Sub New(Optional atrPeriod As Integer = 10, Optional multiplier As Single = 3.0F)
-            _atrPeriod = atrPeriod
-            _multiplier = multiplier
-            _params("AtrPeriod") = _atrPeriod
-            _params("Multiplier") = _multiplier
+            SetOptions(atrPeriod, multiplier)
         End Sub
-
-        Public ReadOnly Property Name As String Implements IIndicator.Name
+        Public Overrides ReadOnly Property Name As String
             Get
                 Return $"ST_{_atrPeriod}_{_multiplier:F1}"
             End Get
         End Property
-        Public ReadOnly Property DisplayName As String Implements IIndicator.DisplayName
+        Public Overrides ReadOnly Property DisplayName As String
             Get
                 Return $"SuperTrend({_atrPeriod},{_multiplier:F1})"
             End Get
         End Property
-        Public ReadOnly Property PanelIndex As Integer Implements IIndicator.PanelIndex
+        Public Overrides ReadOnly Property PanelIndex As Integer
             Get
                 Return 0
             End Get
         End Property
-        Public Property Parameters As Dictionary(Of String, Object) Implements IIndicator.Parameters
+        Public Overrides Property Parameters As Dictionary(Of String, Object)
             Get
                 Return _params
             End Get
             Set(value As Dictionary(Of String, Object))
-                _params = value
-                If _params.ContainsKey("AtrPeriod") Then _atrPeriod = CInt(_params("AtrPeriod"))
-                If _params.ContainsKey("Multiplier") Then _multiplier = CSng(_params("Multiplier"))
+                Dim p = If(value, New Dictionary(Of String, Object))
+                SetOptions(If(p.ContainsKey("AtrPeriod"), Convert.ToInt32(p("AtrPeriod")), _atrPeriod),
+                           If(p.ContainsKey("Multiplier"), Convert.ToSingle(p("Multiplier")), _multiplier))
             End Set
         End Property
-
-        Public Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult) Implements IIndicator.Calculate
-            Dim count = candles.Count
-            Dim results As New List(Of IndicatorResult)(count)
-            If count = 0 Then Return results
-            Dim tr(count - 1) As Single
-            Dim atr(count - 1) As Single
-            tr(0) = candles(0).High - candles(0).Low
-            For i = 1 To count - 1
-                Dim c = candles(i)
-                Dim pc = candles(i - 1).Close
-                Dim v1 = c.High - c.Low
-                Dim v2 = Math.Abs(c.High - pc)
-                Dim v3 = Math.Abs(c.Low - pc)
-                tr(i) = Math.Max(v1, Math.Max(v2, v3))
+        Private Sub SetOptions(period As Integer, multiplier As Single)
+            _atrPeriod = Math.Max(1, period)
+            _multiplier = Math.Max(0.01F, multiplier)
+            _params = New Dictionary(Of String, Object) From {
+                {"AtrPeriod", _atrPeriod}, {"Multiplier", _multiplier}
+            }
+            ResetState()
+        End Sub
+        Public Overrides Function Calculate(candles As IReadOnlyList(Of CandleItem)) As List(Of IndicatorResult)
+            Dim results As New List(Of IndicatorResult)(candles.Count)
+            ResetState()
+            For i = 0 To candles.Count - 1
+                If i = candles.Count - 1 Then SaveState()
+                results.Add(StepCandle(candles(i), i))
             Next
-            Dim atrSum As Single = 0
-            For i = 0 To count - 1
-                atrSum += tr(i)
-                If i < _atrPeriod - 1 Then
-                    atr(i) = Single.NaN
-                ElseIf i = _atrPeriod - 1 Then
-                    atr(i) = atrSum / _atrPeriod
-                Else
-                    atr(i) = (atr(i - 1) * (_atrPeriod - 1) + tr(i)) / _atrPeriod
-                End If
-            Next
-            Dim ub(count - 1) As Single
-            Dim lb(count - 1) As Single
-            Dim st(count - 1) As Single
-            Dim dir(count - 1) As Integer
-            Dim stUp(count - 1) As Single
-            Dim stDown(count - 1) As Single
-            For i = 0 To count - 1
-                If Single.IsNaN(atr(i)) Then
-                    ub(i) = Single.NaN
-                    lb(i) = Single.NaN
-                    st(i) = Single.NaN
-                    dir(i) = 1
-                    stUp(i) = Single.NaN
-                    stDown(i) = Single.NaN
-                    Continue For
-                End If
-                Dim hl2 = (candles(i).High + candles(i).Low) / 2.0F
-                Dim bU = hl2 + _multiplier * atr(i)
-                Dim bL = hl2 - _multiplier * atr(i)
-                If i = 0 OrElse Single.IsNaN(ub(i - 1)) Then
-                    ub(i) = bU
-                Else
-                    If bU < ub(i - 1) OrElse candles(i - 1).Close > ub(i - 1) Then
-                        ub(i) = bU
-                    Else
-                        ub(i) = ub(i - 1)
-                    End If
-                End If
-                If i = 0 OrElse Single.IsNaN(lb(i - 1)) Then
-                    lb(i) = bL
-                Else
-                    If bL > lb(i - 1) OrElse candles(i - 1).Close < lb(i - 1) Then
-                        lb(i) = bL
-                    Else
-                        lb(i) = lb(i - 1)
-                    End If
-                End If
-                If i = 0 Then
-                    If candles(i).Close > ub(i) Then dir(i) = 1 Else dir(i) = -1
-                Else
-                    If dir(i - 1) = 1 Then
-                        If candles(i).Close < lb(i) Then dir(i) = -1 Else dir(i) = 1
-                    Else
-                        If candles(i).Close > ub(i) Then dir(i) = 1 Else dir(i) = -1
-                    End If
-                End If
-                If dir(i) = 1 Then st(i) = lb(i) Else st(i) = ub(i)
-                If st(i) <= 0 AndAlso i > 0 AndAlso Not Single.IsNaN(st(i - 1)) Then
-                    st(i) = st(i - 1)
-                End If
-                If dir(i) = 1 Then
-                    stUp(i) = st(i)
-                    stDown(i) = Single.NaN
-                Else
-                    stDown(i) = st(i)
-                    stUp(i) = Single.NaN
-                End If
-                If i > 0 AndAlso dir(i) <> dir(i - 1) AndAlso Not Single.IsNaN(st(i - 1)) Then
-                    If dir(i) = 1 Then stUp(i - 1) = st(i - 1) Else stDown(i - 1) = st(i - 1)
-                End If
-            Next
-            If count > 0 Then
-                Dim lastIndex = count - 1
-                _stateATR = atr(lastIndex)
-                _stateUpperBand = ub(lastIndex)
-                _stateLowerBand = lb(lastIndex)
-                _stateSuperTrend = st(lastIndex)
-                _stateDirection = dir(lastIndex)
-                _stateIndex = lastIndex
-                If count > 1 Then
-                    _prevStateATR = atr(lastIndex - 1)
-                    _prevStateUpperBand = ub(lastIndex - 1)
-                    _prevStateLowerBand = lb(lastIndex - 1)
-                    _prevStateSuperTrend = st(lastIndex - 1)
-                    _prevStateDirection = dir(lastIndex - 1)
-                Else
-                    _prevStateATR = Single.NaN
-                    _prevStateUpperBand = Single.NaN
-                    _prevStateLowerBand = Single.NaN
-                    _prevStateSuperTrend = Single.NaN
-                    _prevStateDirection = 1
-                End If
+            If candles.Count > 0 Then
+                Dim ring = TryCast(candles, CandleRingBuffer)
+                InitializeIncrementalSequence(If(ring Is Nothing, candles.Count - 1L, ring.LastSequence))
             End If
-            For i = 0 To count - 1
-                Dim r As New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = 0,
-                    .Values = New Dictionary(Of String, Single)}
-                r.Values("Value") = st(i)
-                r.Values("Up") = stUp(i)
-                r.Values("Down") = stDown(i)
-                r.Values("Direction") = CSng(dir(i))
-                r.Values("ATR") = atr(i)
-                results.Add(r)
-            Next
             Return results
         End Function
-
-        Public Function UpdateLast(candles As IReadOnlyList(Of CandleItem), prevResults As List(Of IndicatorResult)) As IndicatorResult Implements IIndicator.UpdateLast
-            Dim i = candles.Count - 1
-            If i < _atrPeriod OrElse Single.IsNaN(_stateATR) Then
-                Dim full = Calculate(candles)
-                If full.Count > 0 Then Return full(full.Count - 1)
-                Return New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = 0,
-                    .Values = New Dictionary(Of String, Single) From {{"Value", Single.NaN}}}
-            End If
-            If i <= 0 Then
-                Dim full = Calculate(candles)
-                If full.Count > 0 Then Return full(full.Count - 1)
-                Return New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = 0,
-                    .Values = New Dictionary(Of String, Single) From {{"Value", Single.NaN}}}
-            End If
-
-            Dim baseATR As Single
-            Dim baseUpper As Single
-            Dim baseLower As Single
-            Dim baseSuperTrend As Single
-            Dim baseDirection As Integer
-
-            If _stateIndex = i Then
-                baseATR = _prevStateATR
-                baseUpper = _prevStateUpperBand
-                baseLower = _prevStateLowerBand
-                baseSuperTrend = _prevStateSuperTrend
-                baseDirection = _prevStateDirection
-            ElseIf _stateIndex = i - 1 Then
-                baseATR = _stateATR
-                baseUpper = _stateUpperBand
-                baseLower = _stateLowerBand
-                baseSuperTrend = _stateSuperTrend
-                baseDirection = _stateDirection
-                _prevStateATR = baseATR
-                _prevStateUpperBand = baseUpper
-                _prevStateLowerBand = baseLower
-                _prevStateSuperTrend = baseSuperTrend
-                _prevStateDirection = baseDirection
+        Protected Overrides Function StepCandle(c As CandleItem, index As Integer) As IndicatorResult
+            Dim tr = If(_hasPrevious,
+                        Math.Max(c.High - c.Low, Math.Max(Math.Abs(c.High - _previousClose), Math.Abs(c.Low - _previousClose))),
+                        c.High - c.Low)
+            _count += 1
+            If _count <= _atrPeriod Then
+                _trSum += tr
+                If _count = _atrPeriod Then _atr = CSng(_trSum / _atrPeriod)
             Else
-                Dim full = Calculate(candles)
-                If full.Count > 0 Then Return full(full.Count - 1)
-                Return New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = 0,
-                    .Values = New Dictionary(Of String, Single) From {{"Value", Single.NaN}}}
-            End If
-            If Single.IsNaN(baseATR) OrElse Single.IsNaN(baseUpper) OrElse Single.IsNaN(baseLower) Then
-                Dim full = Calculate(candles)
-                If full.Count > 0 Then Return full(full.Count - 1)
-                Return New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = 0,
-                    .Values = New Dictionary(Of String, Single) From {{"Value", Single.NaN}}}
+                _atr = (_atr * (_atrPeriod - 1) + tr) / _atrPeriod
             End If
 
-            Dim c = candles(i)
-            Dim prevClose = candles(i - 1).Close
-            Dim v1 = c.High - c.Low
-            Dim v2 = Math.Abs(c.High - prevClose)
-            Dim v3 = Math.Abs(c.Low - prevClose)
-            Dim trVal = Math.Max(v1, Math.Max(v2, v3))
-            Dim curATR = (baseATR * (_atrPeriod - 1) + trVal) / _atrPeriod
-            Dim hl2 = (c.High + c.Low) / 2.0F
-            Dim curUB = hl2 + _multiplier * curATR
-            Dim curLB = hl2 - _multiplier * curATR
-            If curUB < baseUpper OrElse prevClose > baseUpper Then curUB = curUB Else curUB = baseUpper
-            If curLB > baseLower OrElse prevClose < baseLower Then curLB = curLB Else curLB = baseLower
-            Dim curDir As Integer
-            If baseDirection = 1 Then
-                If c.Close < curLB Then curDir = -1 Else curDir = 1
-            Else
-                If c.Close > curUB Then curDir = 1 Else curDir = -1
-            End If
-            Dim curST = If(curDir = 1, curLB, curUB)
-            If curST <= 0 AndAlso Not Single.IsNaN(baseSuperTrend) Then curST = baseSuperTrend
-            Dim upVal As Single = Single.NaN
-            Dim downVal As Single = Single.NaN
-            If curDir = 1 Then upVal = curST Else downVal = curST
-            If curDir <> baseDirection AndAlso prevResults IsNot Nothing AndAlso prevResults.Count > 1 Then
-                Dim prevR = prevResults(prevResults.Count - 2)
-                Dim prevSTV = prevR.Val("Value")
-                If Not Single.IsNaN(prevSTV) Then
-                    If curDir = 1 Then prevR.Values("Up") = prevSTV Else prevR.Values("Down") = prevSTV
+            If _count >= _atrPeriod Then
+                Dim midpoint = (c.High + c.Low) / 2.0F
+                Dim basicUpper = midpoint + _multiplier * _atr
+                Dim basicLower = midpoint - _multiplier * _atr
+                If Single.IsNaN(_upper) OrElse basicUpper < _upper OrElse _previousClose > _upper Then _upper = basicUpper
+                If Single.IsNaN(_lower) OrElse basicLower > _lower OrElse _previousClose < _lower Then _lower = basicLower
+                If _direction = 1 Then
+                    If c.Close < _lower Then _direction = -1
+                ElseIf c.Close > _upper Then
+                    _direction = 1
                 End If
+                _superTrend = If(_direction = 1, _lower, _upper)
             End If
-            _stateATR = curATR
-            _stateUpperBand = curUB
-            _stateLowerBand = curLB
-            _stateSuperTrend = curST
-            _stateDirection = curDir
-            _stateIndex = i
-            Dim r As New IndicatorResult With {.Name = Name, .Index = i, .PanelIndex = 0,
-                .Values = New Dictionary(Of String, Single)}
-            r.Values("Value") = curST
-            r.Values("Up") = upVal
-            r.Values("Down") = downVal
-            r.Values("Direction") = CSng(curDir)
-            r.Values("ATR") = curATR
-            Return r
+            _previousClose = c.Close
+            _hasPrevious = True
+            Return MakeResult(index)
+        End Function
+        Protected Overrides Sub SaveState()
+            _savedPreviousClose = _previousClose : _savedAtr = _atr
+            _savedUpper = _upper : _savedLower = _lower : _savedSuperTrend = _superTrend
+            _savedTrSum = _trSum : _savedCount = _count : _savedDirection = _direction
+            _savedHasPrevious = _hasPrevious
+        End Sub
+        Protected Overrides Sub RestoreState()
+            _previousClose = _savedPreviousClose : _atr = _savedAtr
+            _upper = _savedUpper : _lower = _savedLower : _superTrend = _savedSuperTrend
+            _trSum = _savedTrSum : _count = _savedCount : _direction = _savedDirection
+            _hasPrevious = _savedHasPrevious
+        End Sub
+        Private Sub ResetState()
+            _previousClose = 0 : _atr = Single.NaN : _upper = Single.NaN
+            _lower = Single.NaN : _superTrend = Single.NaN : _trSum = 0
+            _count = 0 : _direction = 1 : _hasPrevious = False
+            ResetIncrementalIndex()
+        End Sub
+        Private Function MakeResult(index As Integer) As IndicatorResult
+            Return New IndicatorResult With {
+                .Name = Name, .Index = index, .PanelIndex = PanelIndex,
+                .Values = New Dictionary(Of String, Single) From {
+                    {"Value", _superTrend}, {"Up", If(_direction = 1, _superTrend, Single.NaN)},
+                    {"Down", If(_direction = -1, _superTrend, Single.NaN)},
+                    {"Direction", CSng(_direction)}, {"ATR", _atr}
+                },
+                .SeriesKinds = New Dictionary(Of String, SeriesKind) From {
+                    {"Value", SeriesKind.Line}, {"Up", SeriesKind.Line}, {"Down", SeriesKind.Line},
+                    {"Direction", SeriesKind.Meta}, {"ATR", SeriesKind.Meta}
+                }
+            }
         End Function
     End Class
 End Namespace

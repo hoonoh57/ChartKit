@@ -1,12 +1,17 @@
 ﻿Imports SkiaSharp
 Imports ChartKit.Abstractions
 Imports ChartKit.Models
+Imports ChartKit.Core.Signals
 
 Namespace Layers
     '' 오버레이 지표 A >= B 인 구간을 메인차트 배경에 음영으로 칠함.
     '' ZOrder=25 : 캔들(20) 위, 지표선(30) 아래.
     Public Class OverlayShadeLayer
         Implements IChartLayer
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            '' 영속 Skia 리소스 없음
+        End Sub
 
         Public ReadOnly Property Id As String Implements IChartLayer.Id
             Get
@@ -26,7 +31,7 @@ Namespace Layers
             IsVisible = True
         End Sub
 
-        Private Shared Function ValAt(results As System.Collections.Generic.List(Of IndicatorResult), i As Integer) As Single
+        Private Shared Function ValAt(results As IReadOnlyList(Of IndicatorResult), i As Integer) As Single
             If results Is Nothing OrElse i < 0 OrElse i >= results.Count Then Return Single.NaN
             Dim r = results(i)
             If r Is Nothing OrElse r.Values Is Nothing Then Return Single.NaN
@@ -50,8 +55,13 @@ Namespace Layers
 
             For Each rule In ctx.ShadeRules
                 If rule Is Nothing OrElse String.IsNullOrEmpty(rule.IndicatorA) OrElse String.IsNullOrEmpty(rule.IndicatorB) Then Continue For
-                Dim ra As System.Collections.Generic.List(Of IndicatorResult) = Nothing
-                Dim rb As System.Collections.Generic.List(Of IndicatorResult) = Nothing
+                If rule.IndicatorA.StartsWith("JMA_", StringComparison.OrdinalIgnoreCase) AndAlso
+                   rule.IndicatorB.StartsWith("JMA_", StringComparison.OrdinalIgnoreCase) Then
+                    DrawQualifiedJmaRanges(canvas, ctx, rule, s, en, rect)
+                    Continue For
+                End If
+                Dim ra As ChartKit.Models.IndicatorResultRingBuffer = Nothing
+                Dim rb As ChartKit.Models.IndicatorResultRingBuffer = Nothing
                 If Not ctx.Engine.Results.TryGetValue(rule.IndicatorA, ra) Then Continue For
                 If Not ctx.Engine.Results.TryGetValue(rule.IndicatorB, rb) Then Continue For
 
@@ -89,6 +99,31 @@ Namespace Layers
                     End If
                 End Using
             Next
+        End Sub
+
+        Private Shared Sub DrawQualifiedJmaRanges(canvas As SKCanvas,
+                                                  ctx As ChartContext,
+                                                  rule As ChartKit.Core.OverlayShadeRule,
+                                                  visibleStart As Integer,
+                                                  visibleEnd As Integer,
+                                                  rect As SKRect)
+            Dim ranges = QualifiedTrendRangeEvaluator.Evaluate(
+                rule, ctx.SignalRules, ctx.Engine.Results, visibleStart, visibleEnd)
+            If ranges.Count = 0 Then Return
+
+            Using paint As New SKPaint With {
+                .Style = SKPaintStyle.Fill, .IsAntialias = False,
+                .Color = New SKColor(CByte(rule.ColorR), CByte(rule.ColorG),
+                                     CByte(rule.ColorB), CByte(rule.ColorA))}
+                For Each range In ranges
+                    Dim first = Math.Max(visibleStart, range.StartIndex)
+                    Dim last = Math.Min(visibleEnd, range.EndIndex)
+                    If first > last Then Continue For
+                    Dim x0 = ctx.Mapper.IndexToX(first) - ctx.CandleWidth / 2
+                    Dim x1 = ctx.Mapper.IndexToX(last) + ctx.CandleWidth / 2
+                    canvas.DrawRect(New SKRect(x0, rect.Top, x1, rect.Bottom), paint)
+                Next
+            End Using
         End Sub
     End Class
 End Namespace

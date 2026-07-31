@@ -19,6 +19,7 @@ Namespace Layers
 
         Private _bullBody As SKPaint, _bearBody As SKPaint
         Private _bullWick As SKPaint, _bearWick As SKPaint
+        Private _paintThemeVersion As Integer = -1
 
         Public Sub Draw(canvas As SKCanvas, ctx As ChartContext) Implements IChartLayer.Draw
             EnsurePaints(ctx.Theme)
@@ -44,11 +45,24 @@ Namespace Layers
         End Sub
 
         Private Sub EnsurePaints(t As ChartTheme)
-            If _bullBody IsNot Nothing Then Return
+            If _bullBody IsNot Nothing AndAlso _paintThemeVersion = t.Version Then Return
+            DisposePaints()
             _bullBody = New SKPaint With {.Style = SKPaintStyle.Fill, .Color = t.BullCandle, .IsAntialias = False}
             _bearBody = New SKPaint With {.Style = SKPaintStyle.Fill, .Color = t.BearCandle, .IsAntialias = False}
             _bullWick = New SKPaint With {.Style = SKPaintStyle.Stroke, .Color = t.BullCandle, .StrokeWidth = 1, .IsAntialias = False}
             _bearWick = New SKPaint With {.Style = SKPaintStyle.Stroke, .Color = t.BearCandle, .StrokeWidth = 1, .IsAntialias = False}
+            _paintThemeVersion = t.Version
+        End Sub
+
+        Private Sub DisposePaints()
+            _bullBody?.Dispose() : _bullBody = Nothing
+            _bearBody?.Dispose() : _bearBody = Nothing
+            _bullWick?.Dispose() : _bullWick = Nothing
+            _bearWick?.Dispose() : _bearWick = Nothing
+        End Sub
+
+        Public Sub Dispose() Implements IDisposable.Dispose
+            DisposePaints()
         End Sub
     End Class
 End Namespace

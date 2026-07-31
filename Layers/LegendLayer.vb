@@ -7,6 +7,10 @@ Namespace Layers
     Public Class LegendLayer
         Implements IChartLayer
 
+        Public Sub Dispose() Implements IDisposable.Dispose
+            '' Draw 내부의 모든 Skia 객체는 Using 범위에서 즉시 폐기된다.
+        End Sub
+
         '' IndicatorLayer 와 반드시 동일한 팔레트 (색 일치용)
         Private Shared ReadOnly IndicatorColors As SKColor() = {
             New SKColor(255, 193, 7), New SKColor(0, 188, 212),
@@ -101,7 +105,7 @@ Namespace Layers
 
                     For Each ind In ctx.Engine.GetAll()
                         If ind.PanelIndex > 0 Then Continue For
-                        Dim results As List(Of IndicatorResult) = Nothing
+                        Dim results As ChartKit.Models.IndicatorResultRingBuffer = Nothing
                         If Not ctx.Engine.Results.TryGetValue(ind.Name, results) Then Continue For
                         If results Is Nothing OrElse results.Count = 0 Then Continue For
 
