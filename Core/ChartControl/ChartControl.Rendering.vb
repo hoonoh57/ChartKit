@@ -13,14 +13,19 @@ Namespace Core
             Dim cB = h - _theme.MarginBottom
             Dim totalH = cB - cT
 
-            Dim panelIdxs As New List(Of Integer)()
+            _layoutPanelIndexes.Clear()
             If _indicatorEngine IsNot Nothing Then
-                For Each ind In _indicatorEngine.GetAll()
-                    If ind.PanelIndex > 0 AndAlso Not panelIdxs.Contains(ind.PanelIndex) Then panelIdxs.Add(ind.PanelIndex)
+                Dim indicators As IReadOnlyList(Of IIndicator) = _indicatorEngine.GetAllView()
+                For indicatorIndex As Integer = 0 To indicators.Count - 1
+                    Dim panelIndex As Integer = indicators(indicatorIndex).PanelIndex
+                    If panelIndex > 0 AndAlso
+                       Not _layoutPanelIndexes.Contains(panelIndex) Then
+                        _layoutPanelIndexes.Add(panelIndex)
+                    End If
                 Next
             End If
-            panelIdxs.Sort()
-            Dim nPanels = panelIdxs.Count
+            _layoutPanelIndexes.Sort()
+            Dim nPanels = _layoutPanelIndexes.Count
 
             While _panelRatios.Count < nPanels : _panelRatios.Add(0.15F) : End While
             While _panelRatios.Count > nPanels : _panelRatios.RemoveAt(_panelRatios.Count - 1) : End While
@@ -113,10 +118,13 @@ Namespace Core
                 .PanelRects = _panelRects, .PanelBaselines = _panelBaselines,
                 .PanelZones = _panelZones, .ShadeRules = _shadeRules, .SignalRules = _signalRules,
                 .StrategyCapture = _strategyCapture,
-                .StrategyReentryOptions = _strategyReentryOptions}
-            ctx.PanelScales = PanelScaleCalculator.Calculate(ctx)
-            For Each layer In _registry.Ordered()
-                layer.Draw(canvas, ctx)
+                .StrategyReentryOptions = _strategyReentryOptions,
+                .PanelScales = _panelScales}
+            PanelScaleCalculator.CalculateInto(ctx, _panelScales, _panelScaleIndexes)
+
+            Dim orderedLayers As IReadOnlyList(Of IChartLayer) = _registry.OrderedView()
+            For layerIndex As Integer = 0 To orderedLayers.Count - 1
+                orderedLayers(layerIndex).Draw(canvas, ctx)
             Next
         End Sub
 
