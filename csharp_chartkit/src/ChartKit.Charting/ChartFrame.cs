@@ -42,6 +42,7 @@ public sealed record ChartLayoutOptions(
     float PriceBottomMarginRatio = 0.06f,
     int MinimumPriceMarginTicks = 4,
     int TargetPriceTickCount = 6,
+    int TargetPanelTickCount = 4,
     int TargetTimeTickCount = 8)
 {
     public static ChartLayoutOptions Default { get; } = new();
@@ -60,6 +61,8 @@ public sealed record ChartLayoutOptions(
             throw new ArgumentOutOfRangeException(nameof(MinimumPriceMarginTicks));
         if (TargetPriceTickCount < 2 || TargetPriceTickCount > ChartFrame.MaximumAxisTickCount)
             throw new ArgumentOutOfRangeException(nameof(TargetPriceTickCount));
+        if (TargetPanelTickCount < 2 || TargetPanelTickCount > ChartFrame.MaximumAxisTickCount)
+            throw new ArgumentOutOfRangeException(nameof(TargetPanelTickCount));
         if (TargetTimeTickCount < 2 || TargetTimeTickCount > ChartFrame.MaximumAxisTickCount)
             throw new ArgumentOutOfRangeException(nameof(TargetTimeTickCount));
     }
@@ -86,6 +89,9 @@ public sealed class ChartFrame
     public ChartRectF[] PanelRects { get; } = new ChartRectF[MaximumPanelIndex + 1];
     public bool[] PanelVisible { get; } = new bool[MaximumPanelIndex + 1];
     public NumericRange[] PanelRanges { get; } = new NumericRange[MaximumPanelIndex + 1];
+    public int[] PanelTickCounts { get; } = new int[MaximumPanelIndex + 1];
+    public NumericAxisTick[] PanelTicks { get; } =
+        new NumericAxisTick[(MaximumPanelIndex + 1) * MaximumAxisTickCount];
     public NumericAxisTick[] PriceTicks { get; } = new NumericAxisTick[MaximumAxisTickCount];
     public TimeAxisTick[] TimeTicks { get; } = new TimeAxisTick[MaximumAxisTickCount];
 
@@ -101,6 +107,30 @@ public sealed class ChartFrame
             throw new ArgumentOutOfRangeException(nameof(panelIndex));
         return MapY(value, PanelRanges[panelIndex], PanelRects[panelIndex]);
     }
+
+    public NumericAxisTick GetPanelTick(int panelIndex, int tickIndex)
+    {
+        if (panelIndex <= 0 || panelIndex > MaximumPanelIndex)
+            throw new ArgumentOutOfRangeException(nameof(panelIndex));
+        if (tickIndex < 0 || tickIndex >= PanelTickCounts[panelIndex])
+            throw new ArgumentOutOfRangeException(nameof(tickIndex));
+        return PanelTicks[PanelTickOffset(panelIndex) + tickIndex];
+    }
+
+    internal void SetPanelTick(
+        int panelIndex,
+        int tickIndex,
+        NumericAxisTick tick)
+    {
+        if (panelIndex <= 0 || panelIndex > MaximumPanelIndex)
+            throw new ArgumentOutOfRangeException(nameof(panelIndex));
+        if (tickIndex < 0 || tickIndex >= MaximumAxisTickCount)
+            throw new ArgumentOutOfRangeException(nameof(tickIndex));
+        PanelTicks[PanelTickOffset(panelIndex) + tickIndex] = tick;
+    }
+
+    private static int PanelTickOffset(int panelIndex) =>
+        panelIndex * MaximumAxisTickCount;
 
     public static float MapY(float value, NumericRange range, ChartRectF rect)
     {
