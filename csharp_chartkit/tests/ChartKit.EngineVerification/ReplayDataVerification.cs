@@ -37,17 +37,20 @@ internal static class ReplayDataVerification
             !events.Any(value => value.Kind == MarketEventKind.Update))
             throw new InvalidOperationException("Replay stream did not produce append and update events.");
 
-        foreach (IGrouping<string, CandleEvent> group in events.GroupBy(value => value.Symbol))
+        var previousBySymbol = new Dictionary<string, long>(StringComparer.Ordinal)
         {
-            long previous = -1;
-            foreach (CandleEvent value in group)
-            {
-                if (value.Candle.Sequence < previous ||
-                    value.Candle.Sequence > previous + 1)
-                    throw new InvalidOperationException(
-                        $"Replay sequence failed for {group.Key}.");
-                previous = value.Candle.Sequence;
-            }
+            ["AAA"] = history[^1].Sequence,
+            ["BBB"] = -1
+        };
+        foreach (CandleEvent value in events)
+        {
+            long previous = previousBySymbol[value.Symbol];
+            if (value.Candle.Sequence < previous ||
+                value.Candle.Sequence > previous + 1)
+                throw new InvalidOperationException(
+                    $"Replay sequence failed for {value.Symbol}: " +
+                    $"previous={previous}, current={value.Candle.Sequence}.");
+            previousBySymbol[value.Symbol] = value.Candle.Sequence;
         }
 
         Console.WriteLine("csharp_replay_datasource=PASS");
