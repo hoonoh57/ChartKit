@@ -2,6 +2,7 @@ Option Strict On
 Option Explicit On
 Option Infer Off
 
+Imports System.Collections.Generic
 Imports ChartKit.Core.Signals
 Imports ChartKit.Core.Strategies
 Imports ChartKit.Indicators
