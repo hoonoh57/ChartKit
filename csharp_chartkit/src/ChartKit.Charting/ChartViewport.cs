@@ -177,6 +177,21 @@ public sealed class ChartViewport
         return Resolve(totalBars);
     }
 
+    public ChartWindow SetVisibleBars(
+        int visibleBars,
+        int totalBars,
+        bool followLatest = false)
+    {
+        bool wasFollowingLatest = IsFollowingLatest;
+        _visibleBars = Math.Clamp(
+            visibleBars,
+            _minimumVisibleBars,
+            _maximumVisibleBars);
+        if (followLatest || wasFollowingLatest)
+            _horizontalShiftBars = 0;
+        return Resolve(totalBars);
+    }
+
     public ChartWindow FollowLatest(int totalBars)
     {
         _horizontalShiftBars = 0;
