@@ -57,10 +57,8 @@ public sealed class ChartViewport
 
         int count = Math.Min(_visibleBars, totalBars);
         int maximumOffset = Math.Max(0, totalBars - count);
-        _rightOffsetBars = Math.Clamp(
-            _rightOffsetBars + deltaBars,
-            0,
-            maximumOffset);
+        long candidate = (long)_rightOffsetBars + deltaBars;
+        _rightOffsetBars = (int)Math.Clamp(candidate, 0L, maximumOffset);
         return Resolve(totalBars);
     }
 
