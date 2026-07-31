@@ -33,7 +33,9 @@ internal static class Program
         IMarketDataSource source = options.Mode == ApplicationMode.Kiwoom
             ? new KiwoomRestDataSource()
             : new ReplayDataSource();
-        Application.Run(new MainForm(options, source));
+        var form = new MainForm(options, source);
+        form.PrepareForDesktopRun();
+        Application.Run(form);
         return 0;
     }
 }
