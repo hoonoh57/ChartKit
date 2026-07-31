@@ -1,25 +1,28 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>ChartKit</RootNamespace>
+    <AssemblyName>ChartKit</AssemblyName>
     <StartupObject>ChartKit.DemoProgram</StartupObject>
     <Nullable>disable</Nullable>
     <OptionStrict>On</OptionStrict>
+    <OptionExplicit>On</OptionExplicit>
+    <OptionInfer>Off</OptionInfer>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
-  <ItemGroup>
-    <!-- 원본 참조 파일: 읽기용으로 보관하되 컴파일에서 제외 -->
-    <Compile Remove="Originals\**\*.vb" />
-    <None Include="Originals\**\*.vb" />
 
-    <!-- 독립 검증 프로젝트 소스는 ChartKit 본체에 포함하지 않는다. -->
-    <Compile Remove="Tests\**\*.vb" />
-  </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="SkiaSharp" Version="2.88.8" />
-    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="2.88.8" />
+    <Compile Include="DemoProgram.vb" />
+    <Compile Include="UI\**\*.vb" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="src\ChartKit.Core\ChartKit.Core.vbproj" />
+    <ProjectReference Include="src\ChartKit.DataSources\ChartKit.DataSources.vbproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Include=".env" Condition="Exists('.env')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
