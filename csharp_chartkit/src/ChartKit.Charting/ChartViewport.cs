@@ -1,9 +1,13 @@
 namespace ChartKit.CSharp.Charting;
 
-public readonly record struct ChartWindow(int StartIndex, int Count)
+public readonly record struct ChartWindow(
+    int StartIndex,
+    int Count,
+    int RightBlankBars = 0)
 {
-    public static ChartWindow Empty { get; } = new(0, 0);
+    public static ChartWindow Empty { get; } = new(0, 0, 0);
     public int EndExclusive => StartIndex + Count;
+    public int VisibleSlotCount => Count + Math.Max(0, RightBlankBars);
     public bool IsEmpty => Count <= 0;
 }
 
@@ -12,13 +16,20 @@ public sealed class ChartViewport
     private readonly int _defaultVisibleBars;
     private readonly int _minimumVisibleBars;
     private readonly int _maximumVisibleBars;
+    private readonly int _defaultRightBlankBars;
+    private readonly int _maximumRightBlankBars;
     private int _visibleBars;
-    private int _rightOffsetBars;
+    private int _horizontalShiftBars;
+    private int _currentRightOffsetBars;
+    private int _currentRightBlankBars;
+    private float _pricePanFraction;
 
     public ChartViewport(
         int visibleBars = 160,
         int minimumVisibleBars = 20,
-        int maximumVisibleBars = 5_000)
+        int maximumVisibleBars = 5_000,
+        int rightBlankBars = 12,
+        int maximumRightBlankBars = 240)
     {
         if (minimumVisibleBars <= 0)
             throw new ArgumentOutOfRangeException(nameof(minimumVisibleBars));
@@ -26,40 +37,91 @@ public sealed class ChartViewport
             throw new ArgumentOutOfRangeException(nameof(maximumVisibleBars));
         if (visibleBars < minimumVisibleBars || visibleBars > maximumVisibleBars)
             throw new ArgumentOutOfRangeException(nameof(visibleBars));
+        if (rightBlankBars < 0)
+            throw new ArgumentOutOfRangeException(nameof(rightBlankBars));
+        if (maximumRightBlankBars < rightBlankBars)
+            throw new ArgumentOutOfRangeException(nameof(maximumRightBlankBars));
 
         _defaultVisibleBars = visibleBars;
         _minimumVisibleBars = minimumVisibleBars;
         _maximumVisibleBars = maximumVisibleBars;
+        _defaultRightBlankBars = rightBlankBars;
+        _maximumRightBlankBars = maximumRightBlankBars;
         _visibleBars = visibleBars;
+        _currentRightBlankBars = rightBlankBars;
     }
 
     public int VisibleBars => _visibleBars;
-    public int RightOffsetBars => _rightOffsetBars;
-    public bool IsFollowingLatest => _rightOffsetBars == 0;
+    public int RightOffsetBars => _currentRightOffsetBars;
+    public int RightBlankBars => _currentRightBlankBars;
+    public float PricePanFraction => _pricePanFraction;
+    public ChartViewTransform Transform => new(_pricePanFraction);
+    public bool IsFollowingLatest => _currentRightOffsetBars == 0;
 
     public ChartWindow Resolve(int totalBars)
     {
-        if (totalBars <= 0) return ChartWindow.Empty;
+        if (totalBars <= 0)
+        {
+            _currentRightOffsetBars = 0;
+            _currentRightBlankBars = _defaultRightBlankBars;
+            return ChartWindow.Empty;
+        }
 
-        int count = Math.Min(_visibleBars, totalBars);
-        int maximumOffset = Math.Max(0, totalBars - count);
-        int offset = Math.Clamp(_rightOffsetBars, 0, maximumOffset);
-        return new ChartWindow(totalBars - count - offset, count);
+        int baseCount = Math.Min(_visibleBars, totalBars);
+        int totalSlots = Math.Max(1, baseCount + _defaultRightBlankBars);
+        int maximumBlank = Math.Min(
+            _maximumRightBlankBars,
+            Math.Max(0, totalSlots - 1));
+        int blank = Math.Clamp(
+            _defaultRightBlankBars - _horizontalShiftBars,
+            0,
+            maximumBlank);
+        int offset = Math.Max(
+            0,
+            _horizontalShiftBars - _defaultRightBlankBars);
+        offset = Math.Min(offset, Math.Max(0, totalBars - 1));
+
+        int capacity = Math.Max(1, totalSlots - blank);
+        int available = Math.Max(1, totalBars - offset);
+        int count = Math.Min(capacity, available);
+        int start = Math.Max(0, totalBars - offset - count);
+
+        _currentRightOffsetBars = offset;
+        _currentRightBlankBars = blank;
+        return new ChartWindow(start, count, blank);
     }
 
     public ChartWindow Pan(int deltaBars, int totalBars)
     {
         if (totalBars <= 0)
         {
-            _rightOffsetBars = 0;
-            return ChartWindow.Empty;
+            _horizontalShiftBars = 0;
+            return Resolve(totalBars);
         }
 
-        int count = Math.Min(_visibleBars, totalBars);
-        int maximumOffset = Math.Max(0, totalBars - count);
-        long candidate = (long)_rightOffsetBars + deltaBars;
-        _rightOffsetBars = (int)Math.Clamp(candidate, 0L, maximumOffset);
+        int totalSlots = Math.Max(
+            1,
+            Math.Min(_visibleBars, totalBars) + _defaultRightBlankBars);
+        int maximumBlank = Math.Min(
+            _maximumRightBlankBars,
+            Math.Max(0, totalSlots - 1));
+        int minimumShift = _defaultRightBlankBars - maximumBlank;
+        int maximumShift = _defaultRightBlankBars + Math.Max(0, totalBars - 1);
+        long candidate = (long)_horizontalShiftBars + deltaBars;
+        _horizontalShiftBars = (int)Math.Clamp(
+            candidate,
+            minimumShift,
+            maximumShift);
         return Resolve(totalBars);
+    }
+
+    public void PanPricePixels(float deltaPixels, float panelHeight)
+    {
+        if (!float.IsFinite(deltaPixels) || panelHeight <= 0f) return;
+        _pricePanFraction = Math.Clamp(
+            _pricePanFraction + deltaPixels / panelHeight,
+            -5f,
+            5f);
     }
 
     public ChartWindow Zoom(
@@ -91,20 +153,24 @@ public sealed class ChartViewport
         nextStart = Math.Clamp(nextStart, 0, Math.Max(0, totalBars - nextVisible));
 
         _visibleBars = nextVisible;
-        _rightOffsetBars = Math.Max(0, totalBars - (nextStart + nextVisible));
+        int nextOffset = Math.Max(0, totalBars - (nextStart + nextVisible));
+        _horizontalShiftBars = nextOffset == 0
+            ? 0
+            : _defaultRightBlankBars + nextOffset;
         return Resolve(totalBars);
     }
 
     public ChartWindow FollowLatest(int totalBars)
     {
-        _rightOffsetBars = 0;
+        _horizontalShiftBars = 0;
         return Resolve(totalBars);
     }
 
     public ChartWindow Reset(int totalBars)
     {
         _visibleBars = _defaultVisibleBars;
-        _rightOffsetBars = 0;
+        _horizontalShiftBars = 0;
+        _pricePanFraction = 0f;
         return Resolve(totalBars);
     }
 }
