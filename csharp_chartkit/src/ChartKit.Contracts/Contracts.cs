@@ -23,6 +23,41 @@ public readonly record struct Tick(
     long Quantity,
     long Sequence);
 
+public enum CandleUnit
+{
+    Minute = 1,
+    Tick = 2,
+    Day = 3,
+    Week = 4,
+    Month = 5
+}
+
+public readonly record struct CandleTimeframe(CandleUnit Unit, int Value)
+{
+    public static CandleTimeframe Minute(int minutes) => new(CandleUnit.Minute, minutes);
+    public static CandleTimeframe Tick(int ticks) => new(CandleUnit.Tick, ticks);
+    public static CandleTimeframe Day => new(CandleUnit.Day, 1);
+    public static CandleTimeframe Week => new(CandleUnit.Week, 1);
+    public static CandleTimeframe Month => new(CandleUnit.Month, 1);
+
+    public void Validate()
+    {
+        if (Value <= 0) throw new ArgumentOutOfRangeException(nameof(Value));
+        if (Unit is CandleUnit.Day or CandleUnit.Week or CandleUnit.Month && Value != 1)
+            throw new ArgumentOutOfRangeException(nameof(Value));
+    }
+
+    public override string ToString() => Unit switch
+    {
+        CandleUnit.Minute => $"{Value}m",
+        CandleUnit.Tick => $"{Value}T",
+        CandleUnit.Day => "D",
+        CandleUnit.Week => "W",
+        CandleUnit.Month => "M",
+        _ => $"{Unit}:{Value}"
+    };
+}
+
 public enum MarketEventKind
 {
     Append = 1,
@@ -36,7 +71,11 @@ public readonly record struct CandleEvent(
     long SourceSequence,
     long EnqueuedTimestamp)
 {
-    public static CandleEvent Create(string symbol, MarketEventKind kind, Candle candle, long sourceSequence = 0) =>
+    public static CandleEvent Create(
+        string symbol,
+        MarketEventKind kind,
+        Candle candle,
+        long sourceSequence = 0) =>
         new(symbol, kind, candle, sourceSequence, Stopwatch.GetTimestamp());
 }
 
@@ -98,7 +137,7 @@ public readonly record struct EngineMetrics(
 
 public sealed record HistoryRequest(
     string Symbol,
-    int IntervalMinutes,
+    CandleTimeframe Timeframe,
     int Count,
     DateTime? To = null);
 
@@ -112,6 +151,6 @@ public interface IMarketDataSource : IAsyncDisposable
 
     IAsyncEnumerable<CandleEvent> StreamAsync(
         IReadOnlyList<string> symbols,
-        int intervalMinutes,
+        CandleTimeframe timeframe,
         CancellationToken cancellationToken);
 }
