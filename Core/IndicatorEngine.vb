@@ -15,6 +15,7 @@ Namespace Core
         Private ReadOnly _indicators As New List(Of RegisteredIndicator)()
         Private ReadOnly _canonicalResults As New Dictionary(Of String, IndicatorResultRingBuffer)(StringComparer.Ordinal)
         Private ReadOnly _results As New Dictionary(Of String, IndicatorResultRingBuffer)(StringComparer.Ordinal)
+        Private _indicatorSnapshot As IIndicator() = Array.Empty(Of IIndicator)()
 
         Public ReadOnly Property Results As Dictionary(Of String, IndicatorResultRingBuffer)
             Get
@@ -41,6 +42,7 @@ Namespace Core
 
             registration.MarkRegistered()
             _indicators.Add(registration)
+            RefreshIndicatorSnapshot()
             RebuildPublishedResults()
         End Sub
 
@@ -58,11 +60,18 @@ Namespace Core
                 StringComparison.Ordinal) Then
                 _canonicalResults.Remove(found.InstanceId)
             End If
+            RefreshIndicatorSnapshot()
             RebuildPublishedResults()
         End Sub
 
+        '' 기존 호출자는 독립 복사본을 받는다.
         Public Function GetAll() As List(Of IIndicator)
-            Return _indicators.Cast(Of IIndicator)().ToList()
+            Return New List(Of IIndicator)(_indicatorSnapshot)
+        End Function
+
+        '' 렌더링 등 읽기 전용 고빈도 경로는 등록 변경 전까지 같은 snapshot을 재사용한다.
+        Public Function GetAllView() As IReadOnlyList(Of IIndicator)
+            Return _indicatorSnapshot
         End Function
 
         Public Sub CalculateAll(candles As IReadOnlyList(Of CandleItem))
@@ -194,6 +203,19 @@ Namespace Core
             Next
         End Sub
 
+        Private Sub RefreshIndicatorSnapshot()
+            If _indicators.Count = 0 Then
+                _indicatorSnapshot = Array.Empty(Of IIndicator)()
+                Return
+            End If
+
+            Dim snapshot(_indicators.Count - 1) As IIndicator
+            For index As Integer = 0 To _indicators.Count - 1
+                snapshot(index) = _indicators(index)
+            Next
+            _indicatorSnapshot = snapshot
+        End Sub
+
         Private Sub RebuildPublishedResults()
             _results.Clear()
 
@@ -245,6 +267,7 @@ Namespace Core
 
         Public Sub Clear()
             _indicators.Clear()
+            _indicatorSnapshot = Array.Empty(Of IIndicator)()
             _canonicalResults.Clear()
             _results.Clear()
         End Sub
