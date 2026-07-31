@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using ChartKit.CSharp.Contracts;
 
@@ -8,12 +9,15 @@ public sealed record ReplayOptions(
     int UpdatesPerCandle = 8,
     int Seed = 1516)
 {
-    public TimeSpan EffectiveEventInterval => EventInterval ?? TimeSpan.FromMilliseconds(40);
+    public TimeSpan EffectiveEventInterval =>
+        EventInterval ?? TimeSpan.FromMilliseconds(40);
 }
 
 public sealed class ReplayDataSource : IMarketDataSource
 {
     private readonly ReplayOptions _options;
+    private readonly ConcurrentDictionary<string, Candle> _historySeeds =
+        new(StringComparer.Ordinal);
 
     public ReplayDataSource(ReplayOptions? options = null)
     {
@@ -55,6 +59,7 @@ public sealed class ReplayDataSource : IMarketDataSource
                 index);
             previous = close;
         }
+        _historySeeds[request.Symbol] = output[^1];
         return Task.FromResult<IReadOnlyList<Candle>>(output);
     }
 
@@ -70,7 +75,13 @@ public sealed class ReplayDataSource : IMarketDataSource
         {
             string symbol = source.Trim();
             if (symbol.Length == 0 || states.ContainsKey(symbol)) continue;
-            states.Add(symbol, ReplayState.Create(symbol, timeframe));
+            _historySeeds.TryGetValue(symbol, out Candle seed);
+            bool hasSeed = _historySeeds.ContainsKey(symbol);
+            states.Add(symbol, ReplayState.Create(
+                symbol,
+                timeframe,
+                hasSeed ? seed : null,
+                hasSeed ? _options.UpdatesPerCandle : 0));
         }
         var random = new Random(_options.Seed);
 
@@ -109,28 +120,45 @@ public sealed class ReplayDataSource : IMarketDataSource
     private static int StableOffset(string symbol)
     {
         int value = 17;
-        foreach (char character in symbol) value = unchecked(value * 31 + character);
+        foreach (char character in symbol)
+            value = unchecked(value * 31 + character);
         return Math.Abs(value % 300);
     }
 
     private sealed class ReplayState
     {
-        private ReplayState(Candle candle)
+        private ReplayState(Candle candle, int updateCount)
         {
             Candle = candle;
+            UpdateCount = updateCount;
+            SourceSequence = candle.Sequence + 1;
         }
 
         public Candle Candle { get; private set; }
         public int UpdateCount { get; private set; }
         public long SourceSequence { get; set; }
 
-        public static ReplayState Create(string symbol, CandleTimeframe timeframe)
+        public static ReplayState Create(
+            string symbol,
+            CandleTimeframe timeframe,
+            Candle? seed,
+            int updateCount)
         {
+            if (seed.HasValue) return new ReplayState(seed.Value, updateCount);
             float price = 1000f + StableOffset(symbol);
             DateTime now = DateTime.Now;
             TimeSpan step = Step(timeframe);
-            var candle = new Candle(now, now + step, price, price, price, price, 0, false, 0);
-            return new ReplayState(candle);
+            var candle = new Candle(
+                now,
+                now + step,
+                price,
+                price,
+                price,
+                price,
+                0,
+                false,
+                0);
+            return new ReplayState(candle, updateCount);
         }
 
         public void BeginNext(CandleTimeframe timeframe)
