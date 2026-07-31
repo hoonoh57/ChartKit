@@ -39,3 +39,6 @@ jobs:
 
       - name: Verify tick aggregation stability
         run: dotnet run --project .\Tests\TickAggregationVerification\VerifyTickAggregation.vbproj -c Release --no-build
+
+      - name: Verify panel layout immutability
+        run: dotnet run --project .\Tests\PanelLayoutVerification\VerifyPanelLayout.vbproj -c Release --no-build
