@@ -45,3 +45,6 @@ jobs:
 
       - name: Verify indicator identity
         run: dotnet run --project .\Tests\IndicatorIdentityVerification\VerifyIndicatorIdentity.vbproj -c Release --no-build
+
+      - name: Verify incremental equivalence
+        run: dotnet run --project .\Tests\IncrementalEquivalenceVerification\VerifyIncrementalEquivalence.vbproj -c Release --no-build
