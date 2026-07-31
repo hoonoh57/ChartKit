@@ -14,6 +14,7 @@ public sealed class KiwoomApiSession : IAsyncDisposable
     private readonly IKiwoomClock _clock;
     private readonly SemaphoreSlim _tokenGate = new(1, 1);
     private readonly SemaphoreSlim _rateGate = new(1, 1);
+    private readonly object _tokenSync = new();
     private string _accessToken = "";
     private DateTimeOffset _tokenExpiresAtUtc = DateTimeOffset.MinValue;
     private long _nextRequestTimestamp;
@@ -28,7 +29,9 @@ public sealed class KiwoomApiSession : IAsyncDisposable
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _clock = clock ?? new SystemKiwoomClock();
         _ownsHttpClient = true;
-        _http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: true);
+        _http = handler is null
+            ? new HttpClient()
+            : new HttpClient(handler, disposeHandler: true);
         _http.Timeout = _options.RequestTimeout;
     }
 
@@ -38,12 +41,12 @@ public sealed class KiwoomApiSession : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        if (TokenIsUsable()) return _accessToken;
+        if (TryGetUsableToken(out string cached)) return cached;
 
         await _tokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (TokenIsUsable()) return _accessToken;
+            if (TryGetUsableToken(out cached)) return cached;
             _options.ValidateCredentials();
 
             using var request = new HttpRequestMessage(
@@ -55,12 +58,16 @@ public sealed class KiwoomApiSession : IAsyncDisposable
                 ["appkey"] = _options.AppKey,
                 ["secretkey"] = _options.SecretKey
             });
-            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            request.Content = new StringContent(
+                body,
+                Encoding.UTF8,
+                "application/json");
 
             using HttpResponseMessage response =
                 await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
             byte[] payload =
-                await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+                await response.Content.ReadAsByteArrayAsync(cancellationToken)
+                    .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 throw CreateHttpException(response.StatusCode, payload, "token");
 
@@ -69,10 +76,14 @@ public sealed class KiwoomApiSession : IAsyncDisposable
             string token = ReadString(root, "token");
             if (token.Length == 0) token = ReadString(root, "access_token");
             if (token.Length == 0)
-                throw new InvalidOperationException("Kiwoom token response did not contain a token.");
+                throw new InvalidOperationException(
+                    "Kiwoom token response did not contain a token.");
 
-            _accessToken = token;
-            _tokenExpiresAtUtc = ResolveTokenExpiry(root, _clock.UtcNow);
+            lock (_tokenSync)
+            {
+                _accessToken = token;
+                _tokenExpiresAtUtc = ResolveTokenExpiry(root, _clock.UtcNow);
+            }
             return token;
         }
         finally
@@ -84,9 +95,16 @@ public sealed class KiwoomApiSession : IAsyncDisposable
     public void InvalidateToken(string exactToken)
     {
         if (string.IsNullOrEmpty(exactToken)) return;
-        if (!string.Equals(_accessToken, exactToken, StringComparison.Ordinal)) return;
-        _accessToken = "";
-        _tokenExpiresAtUtc = DateTimeOffset.MinValue;
+        lock (_tokenSync)
+        {
+            if (!string.Equals(
+                    _accessToken,
+                    exactToken,
+                    StringComparison.Ordinal))
+                return;
+            _accessToken = "";
+            _tokenExpiresAtUtc = DateTimeOffset.MinValue;
+        }
     }
 
     public async Task<KiwoomJsonResponse> PostJsonAsync(
@@ -98,28 +116,37 @@ public sealed class KiwoomApiSession : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Path is required.", nameof(path));
-        if (string.IsNullOrWhiteSpace(apiId)) throw new ArgumentException("API id is required.", nameof(apiId));
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Path is required.", nameof(path));
+        if (string.IsNullOrWhiteSpace(apiId))
+            throw new ArgumentException("API id is required.", nameof(apiId));
 
         int authenticationRetries = 0;
         int throttlingRetries = 0;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            string token = await GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+            string token = await GetAccessTokenAsync(cancellationToken)
+                .ConfigureAwait(false);
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
                 new Uri(_options.RestBaseUri, path));
-            request.Headers.TryAddWithoutValidation("authorization", "Bearer " + token);
+            request.Headers.TryAddWithoutValidation(
+                "authorization", "Bearer " + token);
             request.Headers.TryAddWithoutValidation("api-id", apiId);
-            request.Headers.TryAddWithoutValidation("next-yn", continuation);
+            request.Headers.TryAddWithoutValidation("cont-yn", continuation);
             request.Headers.TryAddWithoutValidation("next-key", nextKey);
-            request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+            request.Content = new StringContent(
+                jsonBody,
+                Encoding.UTF8,
+                "application/json");
 
             using HttpResponseMessage response =
-                await SendThrottledAsync(request, cancellationToken).ConfigureAwait(false);
+                await SendThrottledAsync(request, cancellationToken)
+                    .ConfigureAwait(false);
 
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            if (response.StatusCode is
+                HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
                 InvalidateToken(token);
                 if (authenticationRetries++ == 0) continue;
@@ -127,14 +154,16 @@ public sealed class KiwoomApiSession : IAsyncDisposable
 
             if ((int)response.StatusCode == 429 && throttlingRetries++ < 3)
             {
-                TimeSpan delay = ResolveRetryAfter(response);
+                TimeSpan delay = ResolveRetryAfter(response, _clock.UtcNow);
                 SetGlobalBlock(delay);
-                await _clock.DelayAsync(delay, cancellationToken).ConfigureAwait(false);
+                await _clock.DelayAsync(delay, cancellationToken)
+                    .ConfigureAwait(false);
                 continue;
             }
 
             byte[] payload =
-                await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+                await response.Content.ReadAsByteArrayAsync(cancellationToken)
+                    .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 throw CreateHttpException(response.StatusCode, payload, apiId);
 
@@ -160,7 +189,9 @@ public sealed class KiwoomApiSession : IAsyncDisposable
                 Volatile.Read(ref _nextRequestTimestamp),
                 Volatile.Read(ref _blockedUntilTimestamp));
             if (target > now)
-                await _clock.DelayAsync(ToTimeSpan(target - now), cancellationToken)
+                await _clock.DelayAsync(
+                        ToTimeSpan(target - now),
+                        cancellationToken)
                     .ConfigureAwait(false);
 
             long intervalTicks = ToTimestampTicks(_options.RequestInterval);
@@ -181,9 +212,15 @@ public sealed class KiwoomApiSession : IAsyncDisposable
         return await pending.ConfigureAwait(false);
     }
 
-    private bool TokenIsUsable() =>
-        _accessToken.Length > 0 &&
-        _clock.UtcNow + TokenRefreshSkew < _tokenExpiresAtUtc;
+    private bool TryGetUsableToken(out string token)
+    {
+        lock (_tokenSync)
+        {
+            token = _accessToken;
+            return token.Length > 0 &&
+                   _clock.UtcNow + TokenRefreshSkew < _tokenExpiresAtUtc;
+        }
+    }
 
     private void SetGlobalBlock(TimeSpan delay)
     {
@@ -200,18 +237,22 @@ public sealed class KiwoomApiSession : IAsyncDisposable
     }
 
     private long ToTimestampTicks(TimeSpan value) =>
-        Math.Max(0L, (long)Math.Ceiling(value.TotalSeconds * _clock.Frequency));
+        Math.Max(0L,
+            (long)Math.Ceiling(value.TotalSeconds * _clock.Frequency));
 
     private TimeSpan ToTimeSpan(long timestampTicks) =>
         TimeSpan.FromSeconds((double)timestampTicks / _clock.Frequency);
 
-    private static TimeSpan ResolveRetryAfter(HttpResponseMessage response)
+    private static TimeSpan ResolveRetryAfter(
+        HttpResponseMessage response,
+        DateTimeOffset now)
     {
-        if (response.Headers.RetryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
+        if (response.Headers.RetryAfter?.Delta is { } delta &&
+            delta > TimeSpan.Zero)
             return delta;
         if (response.Headers.RetryAfter?.Date is { } date)
         {
-            TimeSpan calculated = date - DateTimeOffset.UtcNow;
+            TimeSpan calculated = date - now;
             if (calculated > TimeSpan.Zero) return calculated;
         }
         return TimeSpan.FromSeconds(1);
@@ -221,10 +262,14 @@ public sealed class KiwoomApiSession : IAsyncDisposable
         JsonElement root,
         DateTimeOffset now)
     {
-        if (TryReadDouble(root, "expires_in", out double seconds) && seconds > 0)
+        if (TryReadDouble(root, "expires_in", out double seconds) &&
+            seconds > 0)
             return now.AddSeconds(seconds);
 
-        foreach (string key in new[] { "expires_dt", "expires_at", "expiration" })
+        foreach (string key in new[]
+                 {
+                     "expires_dt", "expires_at", "expiration"
+                 })
         {
             string value = ReadString(root, key);
             if (value.Length == 0) continue;
@@ -236,7 +281,10 @@ public sealed class KiwoomApiSession : IAsyncDisposable
                 return offset.ToUniversalTime();
             if (DateTime.TryParseExact(
                     value,
-                    new[] { "yyyyMMddHHmmss", "yyyy-MM-dd HH:mm:ss" },
+                    new[]
+                    {
+                        "yyyyMMddHHmmss", "yyyy-MM-dd HH:mm:ss"
+                    },
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
                     out DateTime local))
@@ -276,7 +324,9 @@ public sealed class KiwoomApiSession : IAsyncDisposable
         string name,
         string fallback)
     {
-        if (response.Headers.TryGetValues(name, out IEnumerable<string>? values))
+        if (response.Headers.TryGetValues(
+                name,
+                out IEnumerable<string>? values))
             return values.FirstOrDefault()?.Trim() ?? fallback;
         if (response.Content.Headers.TryGetValues(name, out values))
             return values.FirstOrDefault()?.Trim() ?? fallback;
