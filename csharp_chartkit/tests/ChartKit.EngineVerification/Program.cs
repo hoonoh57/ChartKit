@@ -5,6 +5,7 @@ try
     RingBufferVerification.Run();
     IndicatorVerification.Run();
     await MultiSymbolVerification.RunAsync();
+    await RenderingVerification.RunAsync();
     Console.WriteLine("csharp_engine_verification=PASS");
     return 0;
 }
