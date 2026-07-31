@@ -2,12 +2,10 @@ using ChartKit.CSharp.Contracts;
 
 namespace ChartKit.CSharp.DataSources;
 
-public enum MarketDataOrder
+public enum SourceArrayDirection
 {
-    Empty = 0,
-    Ascending = 1,
-    Descending = 2,
-    EqualTimeOnly = 3
+    Forward = 0,
+    ReverseWhole = 1
 }
 
 public readonly record struct MarketDataNormalizationReport(
@@ -16,19 +14,20 @@ public readonly record struct MarketDataNormalizationReport(
     int RemovedAdjacentDuplicates,
     int RepairedRanges,
     bool Reversed,
-    bool UsedSlowPath,
-    MarketDataOrder ObservedOrder);
+    bool UsedSlowPath);
 
 public static class MarketDataNormalizer
 {
     public static List<Candle> NormalizeHistory(
         IReadOnlyList<Candle> source,
-        CandleTimeframe timeframe) =>
-        NormalizeHistory(source, timeframe, out _);
+        CandleTimeframe timeframe,
+        SourceArrayDirection direction) =>
+        NormalizeHistory(source, timeframe, direction, out _);
 
     public static List<Candle> NormalizeHistory(
         IReadOnlyList<Candle> source,
         CandleTimeframe timeframe,
+        SourceArrayDirection direction,
         out MarketDataNormalizationReport report)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -36,16 +35,15 @@ public static class MarketDataNormalizer
         if (source.Count == 0)
         {
             report = new MarketDataNormalizationReport(
-                0, 0, 0, 0, false, false, MarketDataOrder.Empty);
+                0, 0, 0, 0, false, false);
             return [];
         }
 
+        bool reverse = direction == SourceArrayDirection.ReverseWhole;
+        bool tick = timeframe.Unit == CandleUnit.Tick;
         ValidateRows(source);
-        MarketDataOrder order = DetectOrder(source);
-        bool reverse = order == MarketDataOrder.Descending;
-        bool preserveEqualTimes = timeframe.Unit == CandleUnit.Tick;
 
-        if (!reverse && IsFastPath(source, preserveEqualTimes))
+        if (!reverse && IsFastPath(source, tick))
         {
             report = new MarketDataNormalizationReport(
                 source.Count,
@@ -53,14 +51,14 @@ public static class MarketDataNormalizer
                 0,
                 0,
                 false,
-                false,
-                order);
+                false);
             return source as List<Candle> ?? source.ToList();
         }
 
         var output = new List<Candle>(source.Count);
         int removedAdjacentDuplicates = 0;
         int repairedRanges = 0;
+        DateTime previousClose = default;
 
         for (int logicalIndex = 0; logicalIndex < source.Count; logicalIndex++)
         {
@@ -84,17 +82,23 @@ public static class MarketDataNormalizer
                 Sequence = output.Count
             };
 
-            if (!preserveEqualTimes &&
-                output.Count > 0 &&
-                output[^1].CloseTime == normalized.CloseTime)
+            if (!tick && output.Count > 0)
             {
-                normalized = normalized with { Sequence = output.Count - 1L };
-                output[^1] = normalized;
-                removedAdjacentDuplicates++;
-                continue;
+                if (normalized.CloseTime < previousClose)
+                    throw new InvalidDataException(
+                        "Non-tick candle order remains mixed after applying the " +
+                        "source-declared whole-array direction. Sorting is forbidden.");
+                if (normalized.CloseTime == previousClose)
+                {
+                    normalized = normalized with { Sequence = output.Count - 1L };
+                    output[^1] = normalized;
+                    removedAdjacentDuplicates++;
+                    continue;
+                }
             }
 
             output.Add(normalized);
+            previousClose = normalized.CloseTime;
         }
 
         report = new MarketDataNormalizationReport(
@@ -103,42 +107,13 @@ public static class MarketDataNormalizer
             removedAdjacentDuplicates,
             repairedRanges,
             reverse,
-            true,
-            order);
+            true);
         return output;
-    }
-
-    private static MarketDataOrder DetectOrder(IReadOnlyList<Candle> source)
-    {
-        int direction = 0;
-        for (int index = 1; index < source.Count; index++)
-        {
-            int comparison = source[index].CloseTime.CompareTo(
-                source[index - 1].CloseTime);
-            if (comparison == 0) continue;
-            int currentDirection = comparison > 0 ? 1 : -1;
-            if (direction == 0)
-            {
-                direction = currentDirection;
-                continue;
-            }
-            if (direction != currentDirection)
-                throw new InvalidDataException(
-                    "Candle order is mixed. The source is preserved and rejected; " +
-                    "time-based sorting is not permitted.");
-        }
-
-        return direction switch
-        {
-            > 0 => MarketDataOrder.Ascending,
-            < 0 => MarketDataOrder.Descending,
-            _ => MarketDataOrder.EqualTimeOnly
-        };
     }
 
     private static bool IsFastPath(
         IReadOnlyList<Candle> source,
-        bool preserveEqualTimes)
+        bool tick)
     {
         DateTime previousClose = default;
         for (int index = 0; index < source.Count; index++)
@@ -149,13 +124,8 @@ public static class MarketDataNormalizer
                 candle.High < candle.Low ||
                 candle.Sequence != index)
                 return false;
-            if (index > 0)
-            {
-                if (candle.CloseTime < previousClose)
-                    return false;
-                if (!preserveEqualTimes && candle.CloseTime == previousClose)
-                    return false;
-            }
+            if (!tick && index > 0 && candle.CloseTime <= previousClose)
+                return false;
             previousClose = candle.CloseTime;
         }
         return true;
