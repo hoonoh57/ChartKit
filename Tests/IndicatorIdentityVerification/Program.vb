@@ -67,8 +67,10 @@ Namespace Verification
             Dim registered As List(Of IIndicator) = engine.GetAll()
             Expect(registered.Count = 2, "같은 옛 이름의 서로 다른 지표가 하나로 축소됨")
 
-            Dim firstIdentity = TryCast(registered(0), IIndicatorIdentity)
-            Dim secondIdentity = TryCast(registered(1), IIndicatorIdentity)
+            Dim firstIdentity As IIndicatorIdentity =
+                TryCast(registered(0), IIndicatorIdentity)
+            Dim secondIdentity As IIndicatorIdentity =
+                TryCast(registered(1), IIndicatorIdentity)
             Expect(firstIdentity IsNot Nothing, "첫 번째 등록 지표 identity 누락")
             Expect(secondIdentity IsNot Nothing, "두 번째 등록 지표 identity 누락")
             Expect(
@@ -103,7 +105,8 @@ Namespace Verification
             engine.CalculateAll(CreateCandles())
 
             Dim registered As IIndicator = engine.GetAll()(0)
-            Dim identity = DirectCast(registered, IIndicatorIdentity)
+            Dim identity As IIndicatorIdentity =
+                DirectCast(registered, IIndicatorIdentity)
 
             Expect(engine.Results.ContainsKey(identity.InstanceId), "정식 MACD InstanceId 누락")
             Expect(engine.Results.ContainsKey("MACD_12_26_9"), "단일 옛 이름 별칭 누락")
