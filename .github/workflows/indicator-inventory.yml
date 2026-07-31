@@ -52,7 +52,7 @@ jobs:
             }
 
           foreach ($file in $candidateFiles) {
-            $relative = $file.FullName.Substring($PWD.Path.Length + 1).Replace('\\', '__')
+            $relative = $file.FullName.Substring($PWD.Path.Length + 1).Replace('\', '__')
             Copy-Item -LiteralPath $file.FullName -Destination (Join-Path inventory $relative)
           }
 
