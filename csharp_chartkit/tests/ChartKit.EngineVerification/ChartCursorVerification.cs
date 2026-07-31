@@ -87,6 +87,12 @@ internal static class ChartCursorVerification
             legend.Entries[0].ColorIndex != 0 ||
             legend.Entries[1].ColorIndex != 1)
             throw new InvalidOperationException("Legend value or palette ordering was invalid.");
+        if (!legend.Entries[0].IsIndicatorStart ||
+            legend.Entries[1].IsIndicatorStart ||
+            !ReferenceEquals(
+                legend.Entries[0].IndicatorName,
+                legend.Entries[1].IndicatorName))
+            throw new InvalidOperationException("Legend indicator-name grouping was invalid.");
         legendBuilder.Build(snapshot, candles.Length - 1, legend);
         if (legend.CandleIndex != candles.Length - 1)
             throw new InvalidOperationException("Latest-candle legend fallback was invalid.");
@@ -125,5 +131,6 @@ internal static class ChartCursorVerification
         Console.WriteLine($"chart_cursor_legend_allocated_bytes={allocated}");
         Console.WriteLine("csharp_chart_cursor=PASS");
         Console.WriteLine("csharp_chart_legend_model=PASS");
+        Console.WriteLine("csharp_chart_legend_grouping=PASS");
     }
 }
