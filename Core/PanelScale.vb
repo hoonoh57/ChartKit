@@ -60,7 +60,7 @@ Namespace Core
                     If indicator.PanelIndex <> panelIndex Then Continue For
 
                     Dim results As IndicatorResultRingBuffer = Nothing
-                    If Not ctx.Engine.Results.TryGetValue(indicator.Name, results) OrElse
+                    If Not ctx.Engine.TryGetResults(indicator, results) OrElse
                        results Is Nothing Then Continue For
 
                     Dim last As Integer = Math.Min(range.Item2, results.Count - 1)
