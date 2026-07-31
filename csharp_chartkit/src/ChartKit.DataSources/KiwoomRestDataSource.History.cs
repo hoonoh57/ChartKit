@@ -43,8 +43,9 @@ public sealed partial class KiwoomRestDataSource
                 });
                 PagedRows page = await FetchPagedAsync(
                     path, apiId, body, count, cancellationToken).ConfigureAwait(false);
-                List<Candle> result = ParseRows(page.Rows, request.Timeframe, daily: true);
-                result = Tail(result, count);
+                List<Candle> result = NormalizeAndTail(
+                    ParseRows(page.Rows, request.Timeframe, daily: true),
+                    count);
                 SaveHistorySeed(symbol, result, 0);
                 return result;
             }
@@ -64,11 +65,17 @@ public sealed partial class KiwoomRestDataSource
                 PagedRows page = await FetchPagedAsync(
                     path, "ka10079", body, requiredBaseRows, cancellationToken)
                     .ConfigureAwait(false);
-                List<Candle> baseCandles = ParseRows(
-                    page.Rows, CandleTimeframe.Tick(baseTicks), daily: false);
-                List<Candle> result = TickCandleAggregator.Aggregate(
-                    baseCandles, targetTicks, baseTicks);
-                result = Tail(result, count);
+                List<Candle> baseCandles = MarketDataNormalizer.NormalizeHistory(
+                    ParseRows(
+                        page.Rows,
+                        CandleTimeframe.Tick(baseTicks),
+                        daily: false));
+                List<Candle> result = NormalizeAndTail(
+                    TickCandleAggregator.Aggregate(
+                        baseCandles,
+                        targetTicks,
+                        baseTicks),
+                    count);
                 int currentTickCount = Math.Min(
                     targetTicks,
                     Math.Max(0,
@@ -90,9 +97,9 @@ public sealed partial class KiwoomRestDataSource
                 PagedRows page = await FetchPagedAsync(
                     path, "ka10080", body, count, cancellationToken)
                     .ConfigureAwait(false);
-                List<Candle> result = ParseRows(
-                    page.Rows, request.Timeframe, daily: false);
-                result = Tail(result, count);
+                List<Candle> result = NormalizeAndTail(
+                    ParseRows(page.Rows, request.Timeframe, daily: false),
+                    count);
                 SaveHistorySeed(symbol, result, 0);
                 return result;
             }
@@ -220,6 +227,14 @@ public sealed partial class KiwoomRestDataSource
         int tickCount)
     {
         if (candles.Count > 0) SaveSeed(symbol, candles[^1], tickCount);
+    }
+
+    private static List<Candle> NormalizeAndTail(
+        IReadOnlyList<Candle> source,
+        int count)
+    {
+        List<Candle> normalized = MarketDataNormalizer.NormalizeHistory(source);
+        return Tail(normalized, count);
     }
 
     private static List<Candle> Tail(List<Candle> source, int count)
