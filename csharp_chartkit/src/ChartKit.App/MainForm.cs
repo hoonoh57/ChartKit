@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using ChartKit.CSharp.Charting;
 using ChartKit.CSharp.Contracts;
 using ChartKit.CSharp.DataSources;
@@ -173,7 +174,8 @@ internal sealed class MainForm : Form
 
     private void OnFrame(object? sender, EventArgs e)
     {
-        if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot) &&
+        SymbolSnapshot? snapshot = null;
+        if (TryGetSelectedSnapshot(out snapshot) &&
             snapshot.Version != _lastVersion)
         {
             _lastVersion = snapshot.Version;
@@ -362,7 +364,8 @@ internal sealed class MainForm : Form
             _chartFrame);
     }
 
-    private bool TryGetSelectedSnapshot(out SymbolSnapshot? snapshot) =>
+    private bool TryGetSelectedSnapshot(
+        [NotNullWhen(true)] out SymbolSnapshot? snapshot) =>
         _engine.TryGetSnapshot(_selectedSymbol, out snapshot) && snapshot is not null;
 
     private void OnFormClosed(object? sender, FormClosedEventArgs e)
