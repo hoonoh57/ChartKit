@@ -42,3 +42,6 @@ jobs:
 
       - name: Verify panel layout immutability
         run: dotnet run --project .\Tests\PanelLayoutVerification\VerifyPanelLayout.vbproj -c Release --no-build
+
+      - name: Verify indicator identity
+        run: dotnet run --project .\Tests\IndicatorIdentityVerification\VerifyIndicatorIdentity.vbproj -c Release --no-build
