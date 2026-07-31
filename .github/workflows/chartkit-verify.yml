@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - improve/chart-engine-hardening
+      - refactor/p1-solution-split
   workflow_dispatch:
 
 permissions:
@@ -19,6 +20,58 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify project boundaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          [xml]$demo = Get-Content .\ChartKit.vbproj -Raw
+          [xml]$core = Get-Content .\src\ChartKit.Core\ChartKit.Core.vbproj -Raw
+          [xml]$data = Get-Content .\src\ChartKit.DataSources\ChartKit.DataSources.vbproj -Raw
+
+          $demoCompile = @($demo.Project.ItemGroup.Compile | ForEach-Object { [string]$_.Include })
+          $expectedDemoCompile = @('DemoProgram.vb', 'UI\**\*.vb')
+          if ($demoCompile.Count -ne $expectedDemoCompile.Count -or
+              @($expectedDemoCompile | Where-Object { $_ -notin $demoCompile }).Count -gt 0) {
+            throw "ChartKit demo compile boundary mismatch: $($demoCompile -join ', ')"
+          }
+
+          $demoRefs = @($demo.Project.ItemGroup.ProjectReference | ForEach-Object { [string]$_.Include })
+          $expectedDemoRefs = @(
+            'src\ChartKit.Core\ChartKit.Core.vbproj',
+            'src\ChartKit.DataSources\ChartKit.DataSources.vbproj'
+          )
+          if ($demoRefs.Count -ne $expectedDemoRefs.Count -or
+              @($expectedDemoRefs | Where-Object { $_ -notin $demoRefs }).Count -gt 0) {
+            throw "ChartKit demo references mismatch: $($demoRefs -join ', ')"
+          }
+
+          $coreCompile = @($core.Project.ItemGroup.Compile | ForEach-Object { [string]$_.Include })
+          foreach ($required in @(
+            '..\..\Abstractions\**\*.vb',
+            '..\..\Models\**\*.vb',
+            '..\..\Indicators\**\*.vb',
+            '..\..\Core\**\*.vb',
+            '..\..\Layers\**\*.vb')) {
+            if ($required -notin $coreCompile) {
+              throw "ChartKit.Core missing compile boundary: $required"
+            }
+          }
+          if (@($core.Project.ItemGroup.ProjectReference).Count -gt 0) {
+            throw 'ChartKit.Core must not reference higher-level projects.'
+          }
+
+          $dataCompile = @($data.Project.ItemGroup.Compile | ForEach-Object { [string]$_.Include })
+          if ($dataCompile.Count -ne 1 -or $dataCompile[0] -ne '..\..\DataSources\**\*.vb') {
+            throw "ChartKit.DataSources compile boundary mismatch: $($dataCompile -join ', ')"
+          }
+          $dataRefs = @($data.Project.ItemGroup.ProjectReference | ForEach-Object { [string]$_.Include })
+          if ($dataRefs.Count -ne 1 -or $dataRefs[0] -ne '..\ChartKit.Core\ChartKit.Core.vbproj') {
+            throw "ChartKit.DataSources reference mismatch: $($dataRefs -join ', ')"
+          }
+
+          Write-Host 'project_split_verification=PASS'
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
