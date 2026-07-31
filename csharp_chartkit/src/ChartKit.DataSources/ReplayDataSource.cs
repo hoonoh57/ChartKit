@@ -13,7 +13,9 @@ public sealed record ReplayOptions(
         EventInterval ?? TimeSpan.FromMilliseconds(40);
 }
 
-public sealed class ReplayDataSource : IMarketDataSource
+public sealed class ReplayDataSource :
+    IMarketDataSource,
+    IInstrumentMetadataSource
 {
     private readonly ReplayOptions _options;
     private readonly ConcurrentDictionary<string, Candle> _historySeeds =
@@ -103,6 +105,20 @@ public sealed class ReplayDataSource : IMarketDataSource
             await Task.Delay(_options.EffectiveEventInterval, cancellationToken)
                 .ConfigureAwait(false);
         }
+    }
+
+    public Task<InstrumentMetadata> GetInstrumentMetadataAsync(
+        string symbol,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string code = string.IsNullOrWhiteSpace(symbol) ? "REPLAY" : symbol.Trim();
+        return Task.FromResult(new InstrumentMetadata(
+            code,
+            code,
+            "REPLAY",
+            Name,
+            DateTimeOffset.UtcNow));
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
