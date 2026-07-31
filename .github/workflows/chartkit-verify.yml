@@ -1,0 +1,56 @@
+name: ChartKit Verification
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - improve/chart-engine-hardening
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore .\ChartKit.sln
+
+      - name: Build Release
+        run: dotnet build .\ChartKit.sln -c Release --no-restore
+
+      - name: Verify realtime FIFO
+        run: dotnet run --project .\Tests\RealtimeFifoVerification\VerifyRealtimeFifo.vbproj -c Release --no-build
+
+      - name: Verify candle time causality
+        run: dotnet run --project .\Tests\CandleTimeVerification\VerifyCandleTime.vbproj -c Release --no-build
+
+      - name: Verify tick aggregation stability
+        run: dotnet run --project .\Tests\TickAggregationVerification\VerifyTickAggregation.vbproj -c Release --no-build
+
+      - name: Verify panel layout immutability
+        run: dotnet run --project .\Tests\PanelLayoutVerification\VerifyPanelLayout.vbproj -c Release --no-build
+
+      - name: Verify indicator identity
+        run: dotnet run --project .\Tests\IndicatorIdentityVerification\VerifyIndicatorIdentity.vbproj -c Release --no-build
+
+      - name: Verify incremental equivalence
+        run: dotnet run --project .\Tests\IncrementalEquivalenceVerification\VerifyIncrementalEquivalence.vbproj -c Release --no-build
+
+      - name: Verify rendering allocation bounds
+        run: dotnet run --project .\Tests\RenderingAllocationVerification\VerifyRenderingAllocation.vbproj -c Release --no-build
+
+      - name: Verify Kiwoom session coordination
+        run: dotnet run --project .\Tests\KiwoomSessionVerification\VerifyKiwoomSession.vbproj -c Release --no-build

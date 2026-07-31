@@ -12,6 +12,9 @@
     <!-- 원본 참조 파일: 읽기용으로 보관하되 컴파일에서 제외 -->
     <Compile Remove="Originals\**\*.vb" />
     <None Include="Originals\**\*.vb" />
+
+    <!-- 독립 검증 프로젝트 소스는 ChartKit 본체에 포함하지 않는다. -->
+    <Compile Remove="Tests\**\*.vb" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="SkiaSharp" Version="2.88.8" />

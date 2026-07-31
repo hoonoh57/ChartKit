@@ -1,3 +1,8 @@
+Option Strict On
+Option Explicit On
+Option Infer Off
+
+Imports System.Collections.Generic
 Imports ChartKit.Core.Signals
 Imports ChartKit.Core.Strategies
 Imports ChartKit.Indicators
@@ -17,24 +22,26 @@ Namespace Core.Backtesting
                 output.ErrorMessage = "캔들 데이터가 부족합니다."
                 Return output
             End If
-            Dim validation = parameters.Validate()
+            If parameters Is Nothing Then Throw New ArgumentNullException(NameOf(parameters))
+
+            Dim validation As String = parameters.Validate()
             If validation.Length > 0 Then Throw New ArgumentException(validation, NameOf(parameters))
 
-            Dim captureIndex = FindCaptureIndex(candles, capturedAt)
+            Dim captureIndex As Integer = CausalCandleSelector.FindLastClosedIndex(candles, capturedAt)
             If captureIndex < 0 OrElse captureIndex >= candles.Count - 1 Then
-                output.ErrorMessage = "지정 시각 이후의 당일 캔들이 없습니다."
+                output.ErrorMessage = "지정 시각까지 확정된 당일 캔들이 없거나 이후 실행 봉이 없습니다."
                 Return output
             End If
 
-            Dim shortJma = New JMA_Indicator(parameters.ShortJma.Period,
-                                             parameters.ShortJma.Phase,
-                                             parameters.ShortJma.Power)
-            Dim longJma = New JMA_Indicator(parameters.LongJma.Period,
-                                            parameters.LongJma.Phase,
-                                            parameters.LongJma.Power)
-            Dim macd = New MACD_Indicator(parameters.Macd.FastPeriod,
-                                          parameters.Macd.SlowPeriod,
-                                          parameters.Macd.SignalPeriod)
+            Dim shortJma As New JMA_Indicator(parameters.ShortJma.Period,
+                                              parameters.ShortJma.Phase,
+                                              parameters.ShortJma.Power)
+            Dim longJma As New JMA_Indicator(parameters.LongJma.Period,
+                                             parameters.LongJma.Phase,
+                                             parameters.LongJma.Power)
+            Dim macd As New MACD_Indicator(parameters.Macd.FastPeriod,
+                                           parameters.Macd.SlowPeriod,
+                                           parameters.Macd.SignalPeriod)
             Dim engine As New IndicatorEngine()
             engine.Register(shortJma)
             engine.Register(longJma)
@@ -48,7 +55,7 @@ Namespace Core.Backtesting
                 .IndicatorA = shortJma.Name,
                 .IndicatorB = longJma.Name,
                 .CrossUp = True}
-            Dim ranges = QualifiedTrendRangeEvaluator.Evaluate(
+            Dim ranges As List(Of QualifiedTrendRange) = QualifiedTrendRangeEvaluator.Evaluate(
                 shade, {signal}, engine.Results, captureIndex, candles.Count - 1,
                 parameters.Qualification)
             Dim macdResults As IndicatorResultRingBuffer = Nothing
@@ -63,18 +70,10 @@ Namespace Core.Backtesting
                 candles, macdResults, ranges,
                 New StrategyCapture With {
                     .CandleIndex = captureIndex,
-                    .CapturedAt = candles(captureIndex).Dt,
+                    .CapturedAt = capturedAt,
                     .CapturePrice = output.CapturePrice},
                 parameters.Safety)
             Return output
-        End Function
-
-        Private Shared Function FindCaptureIndex(candles As IReadOnlyList(Of CandleItem),
-                                                 capturedAt As DateTime) As Integer
-            For i = 0 To candles.Count - 1
-                If candles(i).Dt.Date = capturedAt.Date AndAlso candles(i).Dt >= capturedAt Then Return i
-            Next
-            Return -1
         End Function
     End Class
 End Namespace

@@ -13,46 +13,45 @@ Namespace Core
             Dim cB = h - _theme.MarginBottom
             Dim totalH = cB - cT
 
-            Dim panelIdxs As New List(Of Integer)()
+            _layoutPanelIndexes.Clear()
             If _indicatorEngine IsNot Nothing Then
-                For Each ind In _indicatorEngine.GetAll()
-                    If ind.PanelIndex > 0 AndAlso Not panelIdxs.Contains(ind.PanelIndex) Then panelIdxs.Add(ind.PanelIndex)
+                Dim indicators As IReadOnlyList(Of IIndicator) = _indicatorEngine.GetAllView()
+                For indicatorIndex As Integer = 0 To indicators.Count - 1
+                    Dim panelIndex As Integer = indicators(indicatorIndex).PanelIndex
+                    If panelIndex > 0 AndAlso
+                       Not _layoutPanelIndexes.Contains(panelIndex) Then
+                        _layoutPanelIndexes.Add(panelIndex)
+                    End If
                 Next
             End If
-            panelIdxs.Sort()
-            Dim nPanels = panelIdxs.Count
+            _layoutPanelIndexes.Sort()
+            Dim nPanels = _layoutPanelIndexes.Count
 
             While _panelRatios.Count < nPanels : _panelRatios.Add(0.15F) : End While
             While _panelRatios.Count > nPanels : _panelRatios.RemoveAt(_panelRatios.Count - 1) : End While
 
-            Dim volH As Single = totalH * _theme.VolumeRatio
-            If _registry.Exists("Volume") AndAlso Not _registry.IsLayerVisible("Volume") Then volH = 0
-            Dim panelTotal As Single
-            For k = 0 To nPanels - 1 : panelTotal += totalH * _panelRatios(k) : Next
-            Dim panelsHidden = _registry.Exists("Panels") AndAlso Not _registry.IsLayerVisible("Panels")
-            If panelsHidden Then panelTotal = 0
-            Dim mainH As Single = totalH - volH - panelTotal
-
-            Dim minMain = totalH * 0.25F
-            If mainH < minMain Then
-                Dim over = minMain - mainH
-                Dim shrinkable = volH + panelTotal
-                If shrinkable > 0 Then
-                    Dim scale = Math.Max(0.0F, (shrinkable - over) / shrinkable)
-                    volH *= scale
-                    For k = 0 To nPanels - 1 : _panelRatios(k) *= scale : Next
-                    panelTotal *= scale
-                End If
-                mainH = totalH - volH - panelTotal
-            End If
+            Dim volumeVisible = Not (
+                _registry.Exists("Volume") AndAlso
+                Not _registry.IsLayerVisible("Volume"))
+            Dim panelsVisible = Not (
+                _registry.Exists("Panels") AndAlso
+                Not _registry.IsLayerVisible("Panels"))
+            Dim layout = PanelLayoutCalculator.Calculate(
+                totalH,
+                _theme.VolumeRatio,
+                _panelRatios,
+                volumeVisible,
+                panelsVisible)
+            Dim mainH = layout.MainHeight
+            Dim volH = layout.VolumeHeight
 
             _mainRect = New SKRect(cL, cT, cR, cT + mainH)
             _volumeRect = New SKRect(cL, _mainRect.Bottom, cR, _mainRect.Bottom + volH)
             _panelRects.Clear()
-            If Not panelsHidden Then
+            If panelsVisible Then
                 Dim y As Single = _volumeRect.Bottom
-                For k = 0 To nPanels - 1
-                    Dim ph As Single = totalH * _panelRatios(k)
+                For k = 0 To layout.PanelHeights.Count - 1
+                    Dim ph As Single = layout.PanelHeights(k)
                     _panelRects.Add(New SKRect(cL, y, cR, y + ph))
                     y += ph
                 Next
@@ -119,10 +118,13 @@ Namespace Core
                 .PanelRects = _panelRects, .PanelBaselines = _panelBaselines,
                 .PanelZones = _panelZones, .ShadeRules = _shadeRules, .SignalRules = _signalRules,
                 .StrategyCapture = _strategyCapture,
-                .StrategyReentryOptions = _strategyReentryOptions}
-            ctx.PanelScales = PanelScaleCalculator.Calculate(ctx)
-            For Each layer In _registry.Ordered()
-                layer.Draw(canvas, ctx)
+                .StrategyReentryOptions = _strategyReentryOptions,
+                .PanelScales = _panelScales}
+            PanelScaleCalculator.CalculateInto(ctx, _panelScales, _panelScaleIndexes)
+
+            Dim orderedLayers As IReadOnlyList(Of IChartLayer) = _registry.OrderedView()
+            For layerIndex As Integer = 0 To orderedLayers.Count - 1
+                orderedLayers(layerIndex).Draw(canvas, ctx)
             Next
         End Sub
 
