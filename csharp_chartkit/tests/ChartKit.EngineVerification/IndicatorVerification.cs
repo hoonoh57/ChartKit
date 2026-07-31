@@ -23,7 +23,8 @@ internal static class IndicatorVerification
         List<Candle> candles = Fixture.CreateCandles(96);
         IReadOnlyList<IndicatorPoint> initial = indicator.Calculate(candles);
         if (initial.Count != candles.Count)
-            throw new InvalidOperationException($"{indicator.Descriptor.Id}: initial count mismatch.");
+            throw new InvalidOperationException(
+                $"{indicator.Descriptor.Id}: initial count mismatch.");
 
         Candle appended = Fixture.CreateCandles(97)[^1];
         candles.Add(appended);
@@ -59,21 +60,36 @@ internal static class IndicatorVerification
         string scenario)
     {
         IndicatorPoint actual = incremental.UpdateLast(candles);
-        IIncrementalIndicator fresh =
-            (IIncrementalIndicator)(Activator.CreateInstance(incremental.GetType())
-                ?? throw new InvalidOperationException("Indicator construction failed."));
+        IIncrementalIndicator fresh = CreateFresh(incremental);
         IndicatorPoint expected = fresh.Calculate(candles)[^1];
 
         if (actual.Sequence != expected.Sequence)
             throw new InvalidOperationException(
                 $"{incremental.Descriptor.Id}/{scenario}: sequence mismatch.");
 
-        for (int keyIndex = 0; keyIndex < incremental.Descriptor.ValueCount; keyIndex++)
+        for (int keyIndex = 0;
+             keyIndex < incremental.Descriptor.ValueCount;
+             keyIndex++)
         {
             Fixture.Equal(
                 expected.GetValue(keyIndex),
                 actual.GetValue(keyIndex),
-                $"{incremental.Descriptor.Id}/{scenario}/{incremental.Descriptor.Keys[keyIndex]}");
+                $"{incremental.Descriptor.Id}/{scenario}/" +
+                incremental.Descriptor.Keys[keyIndex]);
         }
     }
+
+    private static IIncrementalIndicator CreateFresh(
+        IIncrementalIndicator indicator) => indicator switch
+    {
+        MaIndicator => new MaIndicator(),
+        JmaIndicator => new JmaIndicator(),
+        RsiIndicator => new RsiIndicator(),
+        MacdIndicator => new MacdIndicator(),
+        ObvIndicator => new ObvIndicator(),
+        SuperTrendIndicator => new SuperTrendIndicator(),
+        VwapIndicator => new VwapIndicator(),
+        DisparityIndicator => new DisparityIndicator(),
+        _ => throw new NotSupportedException(indicator.GetType().FullName)
+    };
 }
