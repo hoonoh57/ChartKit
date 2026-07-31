@@ -81,15 +81,19 @@ public sealed partial class SkiaChartRenderer : IDisposable
             throw new ArgumentOutOfRangeException(nameof(frame));
         }
 
-        DrawGrid(canvas, frame);
+        DrawGrid(canvas, frame, settings.ShowDateBoundaries);
         DrawCandles(canvas, snapshot, frame);
         DrawIndicatorSeries(canvas, snapshot, frame);
-        if (settings.ShowAxes) DrawAxes(canvas, frame);
+        if (settings.ShowAxes)
+            DrawAxes(canvas, frame, settings.ShowDateBoundaries);
         if (settings.ShowText) DrawHeader(canvas, snapshot, frame);
         canvas.Restore();
     }
 
-    private void DrawGrid(SKCanvas canvas, ChartFrame frame)
+    private void DrawGrid(
+        SKCanvas canvas,
+        ChartFrame frame,
+        bool showDateBoundaries)
     {
         _gridPath.Rewind();
         _dateBoundaryPath.Rewind();
@@ -117,7 +121,9 @@ public sealed partial class SkiaChartRenderer : IDisposable
         for (int index = 0; index < frame.TimeTickCount; index++)
         {
             TimeAxisTick tick = frame.TimeTicks[index];
-            SKPath path = tick.IsDateBoundary ? _dateBoundaryPath : _gridPath;
+            SKPath path = showDateBoundaries && tick.IsDateBoundary
+                ? _dateBoundaryPath
+                : _gridPath;
             path.MoveTo(tick.Position, frame.MainPanel.Top);
             path.LineTo(tick.Position, chartBottom);
         }
@@ -130,7 +136,8 @@ public sealed partial class SkiaChartRenderer : IDisposable
         }
 
         canvas.DrawPath(_gridPath, _gridPaint);
-        canvas.DrawPath(_dateBoundaryPath, _dateBoundaryPaint);
+        if (showDateBoundaries)
+            canvas.DrawPath(_dateBoundaryPath, _dateBoundaryPaint);
     }
 
     private void DrawCandles(
@@ -189,7 +196,10 @@ public sealed partial class SkiaChartRenderer : IDisposable
         canvas.DrawPath(_downVolumePath, _downVolumePaint);
     }
 
-    private void DrawAxes(SKCanvas canvas, ChartFrame frame)
+    private void DrawAxes(
+        SKCanvas canvas,
+        ChartFrame frame,
+        bool showDateBoundaries)
     {
         for (int index = 0; index < frame.PriceTickCount; index++)
         {
@@ -220,7 +230,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
         for (int index = 0; index < frame.TimeTickCount; index++)
         {
             TimeAxisTick tick = frame.TimeTicks[index];
-            string label = tick.IsDateBoundary
+            string label = showDateBoundaries && tick.IsDateBoundary
                 ? tick.Time.ToString("MM/dd HH:mm", CultureInfo.InvariantCulture)
                 : tick.Time.ToString("HH:mm", CultureInfo.InvariantCulture);
             float textWidth = _textPaint.MeasureText(label);
