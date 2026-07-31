@@ -44,7 +44,7 @@ internal sealed class ScriptedHttpHandler : HttpMessageHandler
             request.RequestUri?.AbsolutePath ?? "",
             Header(request, "api-id"),
             Header(request, "authorization"),
-            Header(request, "next-yn"),
+            Header(request, "cont-yn"),
             Header(request, "next-key"),
             body,
             _timestamp()));
