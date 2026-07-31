@@ -13,7 +13,7 @@ Namespace Core
         ReadOnly Property LegacyName As String
     End Interface
 
-    Friend NotInheritable Class IndicatorIdentity
+    Public NotInheritable Class IndicatorIdentity
         Private Sub New()
         End Sub
 
