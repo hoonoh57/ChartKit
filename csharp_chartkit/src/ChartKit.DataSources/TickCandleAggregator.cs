@@ -25,55 +25,26 @@ public static class TickCandleAggregator
         if (targetTicks % baseTicks != 0)
             throw new ArgumentException("Target ticks must be divisible by base ticks.");
 
-        IReadOnlyList<Candle> ordered = EnsureForwardDirection(source);
         var output = new List<Candle>();
-        if (ordered.Count == 0) return output;
+        if (source.Count == 0) return output;
         int groupSize = targetTicks / baseTicks;
         if (groupSize == 1)
         {
-            output.AddRange(ordered);
+            output.AddRange(source);
             return output;
         }
 
         int dayStart = 0;
-        for (int index = 1; index <= ordered.Count; index++)
+        for (int index = 1; index <= source.Count; index++)
         {
-            bool end = index == ordered.Count;
+            bool end = index == source.Count;
             bool dateChanged = !end &&
-                ordered[index].TradingDate != ordered[dayStart].TradingDate;
+                source[index].TradingDate != source[dayStart].TradingDate;
             if (!end && !dateChanged) continue;
-            AggregateDay(ordered, dayStart, index - 1, groupSize, output);
+            AggregateDay(source, dayStart, index - 1, groupSize, output);
             dayStart = index;
         }
         return output;
-    }
-
-    private static IReadOnlyList<Candle> EnsureForwardDirection(
-        IReadOnlyList<Candle> source)
-    {
-        int direction = 0;
-        for (int index = 1; index < source.Count; index++)
-        {
-            int comparison = source[index].CloseTime.CompareTo(
-                source[index - 1].CloseTime);
-            if (comparison == 0) continue;
-            int currentDirection = comparison > 0 ? 1 : -1;
-            if (direction == 0)
-            {
-                direction = currentDirection;
-                continue;
-            }
-            if (direction != currentDirection)
-                throw new InvalidDataException(
-                    "Tick candle direction is mixed. Time-based sorting is forbidden " +
-                    "because equal HHmm timestamps carry order only in the array.");
-        }
-
-        if (direction >= 0) return source;
-        var reversed = new List<Candle>(source.Count);
-        for (int index = source.Count - 1; index >= 0; index--)
-            reversed.Add(source[index]);
-        return reversed;
     }
 
     private static void AggregateDay(
