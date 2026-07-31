@@ -1,3 +1,4 @@
+using ChartKit.CSharp.Charting;
 using ChartKit.CSharp.Contracts;
 using ChartKit.CSharp.DataSources;
 using ChartKit.CSharp.Engine;
@@ -12,6 +13,7 @@ internal sealed class MainForm : Form
     private readonly AppOptions _options;
     private readonly IMarketDataSource _source;
     private readonly MultiSymbolEngine _engine;
+    private readonly ChartViewport _viewport;
     private readonly SkiaChartRenderer _renderer = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly ComboBox _symbols = new();
@@ -21,6 +23,9 @@ internal sealed class MainForm : Form
     private Task? _streamTask;
     private string _selectedSymbol;
     private long _lastVersion = -1;
+    private bool _dragging;
+    private int _lastDragX;
+    private double _dragBarRemainder;
     private int _closing;
 
     public MainForm(AppOptions options, IMarketDataSource source)
@@ -28,6 +33,10 @@ internal sealed class MainForm : Form
         _options = options;
         _source = source;
         _selectedSymbol = options.Symbols[0];
+        _viewport = new ChartViewport(
+            visibleBars: Math.Clamp(options.HistoryCount, 20, 240),
+            minimumVisibleBars: 20,
+            maximumVisibleBars: 5_000);
         _engine = new MultiSymbolEngine(new MultiSymbolEngineOptions(
             WorkerCount: 0,
             QueueCapacityPerWorker: 8192,
@@ -57,6 +66,8 @@ internal sealed class MainForm : Form
             {
                 _selectedSymbol = symbol;
                 _lastVersion = -1;
+                if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+                    _viewport.Reset(snapshot.Candles.Length);
                 _chart.Invalidate();
             }
         };
@@ -70,7 +81,15 @@ internal sealed class MainForm : Form
 
         _chart.Dock = DockStyle.Fill;
         _chart.BackColor = Color.Black;
+        _chart.TabStop = true;
         _chart.PaintSurface += OnPaintSurface;
+        _chart.MouseEnter += (_, _) => _chart.Focus();
+        _chart.MouseWheel += OnChartMouseWheel;
+        _chart.MouseDown += OnChartMouseDown;
+        _chart.MouseMove += OnChartMouseMove;
+        _chart.MouseUp += OnChartMouseUp;
+        _chart.MouseDoubleClick += OnChartMouseDoubleClick;
+        _chart.KeyDown += OnChartKeyDown;
         Controls.Add(_chart);
         Controls.Add(toolbar);
 
@@ -96,6 +115,8 @@ internal sealed class MainForm : Form
                 await _engine.LoadHistoryAsync(symbol, history, _stop.Token);
             }
 
+            if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+                _viewport.Reset(snapshot.Candles.Length);
             _status.Text = "C# realtime running";
             _frameTimer.Start();
             _streamTask = Task.Run(PumpRealtimeAsync, CancellationToken.None);
@@ -144,10 +165,7 @@ internal sealed class MainForm : Form
 
     private void OnFrame(object? sender, EventArgs e)
     {
-        if (_engine.TryGetSnapshot(
-                _selectedSymbol,
-                out SymbolSnapshot? snapshot) &&
-            snapshot is not null &&
+        if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot) &&
             snapshot.Version != _lastVersion)
         {
             _lastVersion = snapshot.Version;
@@ -155,8 +173,12 @@ internal sealed class MainForm : Form
         }
 
         EngineMetrics metrics = _engine.GetMetrics();
+        ChartWindow window = snapshot is null
+            ? ChartWindow.Empty
+            : _viewport.Resolve(snapshot.Candles.Length);
         _status.Text =
             $"{_source.Name} | {_options.Timeframe} | " +
+            $"bars {window.Count:N0} offset {_viewport.RightOffsetBars:N0} | " +
             $"events {metrics.ProcessedEvents:N0} | " +
             $"queue max {metrics.MaxQueueDepth:N0} | " +
             $"latency {metrics.LastLatencyMicroseconds:N0}us";
@@ -164,23 +186,116 @@ internal sealed class MainForm : Form
 
     private void OnPaintSurface(object? sender, SKPaintSurfaceEventArgs e)
     {
-        if (!_engine.TryGetSnapshot(
-                _selectedSymbol,
-                out SymbolSnapshot? snapshot) ||
-            snapshot is null)
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
         {
             e.Surface.Canvas.Clear(new SKColor(11, 15, 20));
             return;
         }
 
+        ChartWindow window = _viewport.Resolve(snapshot.Candles.Length);
         _renderer.Render(
             e.Surface.Canvas,
             new SKRect(0, 0, e.Info.Width, e.Info.Height),
             snapshot,
-            new ChartRenderOptions(
-                VisibleBars: Math.Min(240, Math.Max(1, snapshot.Candles.Length)),
-                ShowText: true));
+            window,
+            new ChartRenderOptions(ShowText: true));
     }
+
+    private void OnChartMouseWheel(object? sender, MouseEventArgs e)
+    {
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        float anchor = Math.Clamp(
+            (float)e.X / Math.Max(1, _chart.ClientSize.Width),
+            0f,
+            1f);
+        _viewport.Zoom(e.Delta, snapshot.Candles.Length, anchor);
+        _chart.Invalidate();
+    }
+
+    private void OnChartMouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        _dragging = true;
+        _lastDragX = e.X;
+        _dragBarRemainder = 0d;
+        _chart.Capture = true;
+        _chart.Focus();
+    }
+
+    private void OnChartMouseMove(object? sender, MouseEventArgs e)
+    {
+        if (!_dragging || !TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        ChartWindow window = _viewport.Resolve(snapshot.Candles.Length);
+        if (window.IsEmpty) return;
+
+        int deltaPixels = e.X - _lastDragX;
+        _lastDragX = e.X;
+        double pixelsPerBar = Math.Max(
+            1d,
+            (double)Math.Max(1, _chart.ClientSize.Width) / window.Count);
+        _dragBarRemainder += deltaPixels / pixelsPerBar;
+        int deltaBars = (int)Math.Truncate(_dragBarRemainder);
+        if (deltaBars == 0) return;
+
+        _dragBarRemainder -= deltaBars;
+        _viewport.Pan(deltaBars, snapshot.Candles.Length);
+        _chart.Invalidate();
+    }
+
+    private void OnChartMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        _dragging = false;
+        _dragBarRemainder = 0d;
+        _chart.Capture = false;
+    }
+
+    private void OnChartMouseDoubleClick(object? sender, MouseEventArgs e)
+    {
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        _viewport.FollowLatest(snapshot.Candles.Length);
+        _chart.Invalidate();
+    }
+
+    private void OnChartKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        ChartWindow window = _viewport.Resolve(snapshot.Candles.Length);
+        int page = Math.Max(1, window.Count / 2);
+
+        switch (e.KeyCode)
+        {
+            case Keys.Left:
+                _viewport.Pan(1, snapshot.Candles.Length);
+                break;
+            case Keys.Right:
+                _viewport.Pan(-1, snapshot.Candles.Length);
+                break;
+            case Keys.PageUp:
+                _viewport.Pan(page, snapshot.Candles.Length);
+                break;
+            case Keys.PageDown:
+                _viewport.Pan(-page, snapshot.Candles.Length);
+                break;
+            case Keys.Home:
+                _viewport.Pan(snapshot.Candles.Length, snapshot.Candles.Length);
+                break;
+            case Keys.End:
+                _viewport.FollowLatest(snapshot.Candles.Length);
+                break;
+            case Keys.Escape:
+                _viewport.Reset(snapshot.Candles.Length);
+                break;
+            default:
+                return;
+        }
+
+        e.Handled = true;
+        _chart.Invalidate();
+    }
+
+    private bool TryGetSelectedSnapshot(out SymbolSnapshot? snapshot) =>
+        _engine.TryGetSnapshot(_selectedSymbol, out snapshot) && snapshot is not null;
 
     private void OnFormClosed(object? sender, FormClosedEventArgs e)
     {
