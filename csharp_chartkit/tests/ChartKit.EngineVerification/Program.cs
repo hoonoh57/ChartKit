@@ -6,6 +6,11 @@ try
     IndicatorVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
+    TickDataVerification.Run();
+    await ReplayDataVerification.RunAsync();
+    await KiwoomSessionVerification.RunAsync();
+    await KiwoomHistoryVerification.RunAsync();
+    RealtimeBuilderVerification.Run();
     Console.WriteLine("csharp_engine_verification=PASS");
     return 0;
 }
