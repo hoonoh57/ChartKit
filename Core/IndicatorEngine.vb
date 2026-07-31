@@ -74,6 +74,25 @@ Namespace Core
             Return _indicatorSnapshot
         End Function
 
+        '' 계산 결과는 등록 당시 InstanceId에 저장된다.
+        '' 동적 Name/InstanceId 재계산 없이 해당 결과 버퍼를 조회한다.
+        Public Function TryGetResults(indicator As IIndicator,
+                                      ByRef results As IndicatorResultRingBuffer) As Boolean
+            results = Nothing
+            If indicator Is Nothing Then Return False
+
+            Dim registration As RegisteredIndicator =
+                TryCast(indicator, RegisteredIndicator)
+            Dim key As String
+            If registration Is Nothing Then
+                key = indicator.Name
+            Else
+                key = registration.RegisteredInstanceId
+            End If
+
+            Return _results.TryGetValue(key, results)
+        End Function
+
         Public Sub CalculateAll(candles As IReadOnlyList(Of CandleItem))
             If candles Is Nothing OrElse candles.Count = 0 Then Return
 
