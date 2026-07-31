@@ -26,6 +26,7 @@ internal static class RenderingVerification
             new SKImageInfo(1200, 800, SKColorType.Bgra8888, SKAlphaType.Premul));
         using var canvas = new SKCanvas(bitmap);
         using var renderer = new SkiaChartRenderer();
+        using var legendRenderer = new ChartLegendRenderer();
         using var crosshairRenderer = new ChartCrosshairRenderer();
         var viewport = new ChartViewport(180, 20, 500);
         var frameBuilder = new ChartFrameBuilder();
@@ -51,12 +52,39 @@ internal static class RenderingVerification
             throw new InvalidOperationException(
                 $"Rendering allocation exceeded bound: {allocated} bytes.");
 
+        var legendBuilder = new ChartLegendBuilder();
+        var legend = new ChartLegendFrame();
+        legendBuilder.Build(snapshot, window.EndExclusive - 1, legend);
+        legendRenderer.Render(canvas, frame, legend);
+        canvas.Flush();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long legendBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < 200; index++)
+            legendRenderer.Render(canvas, frame, legend);
+        canvas.Flush();
+        long legendAllocated =
+            GC.GetAllocatedBytesForCurrentThread() - legendBefore;
+        if (legendAllocated > 32_768)
+            throw new InvalidOperationException(
+                $"Legend rendering allocation exceeded bound: {legendAllocated} bytes.");
+
         var cursorController = new ChartCursorController();
+        ChartRectF cursorPanel = frame.MainPanel;
+        for (int panel = 1; panel <= ChartFrame.MaximumPanelIndex; panel++)
+        {
+            if (!frame.PanelVisible[panel]) continue;
+            cursorPanel = frame.PanelRects[panel];
+            break;
+        }
         ChartCursorSnapshot cursor = cursorController.Update(
             frame.X(40),
-            frame.MainPanel.MidY,
+            cursorPanel.MidY,
             snapshot,
             frame);
+        if (!cursor.IsVisible)
+            throw new InvalidOperationException("Panel crosshair fixture was not visible.");
         crosshairRenderer.Render(canvas, frame, cursor);
         canvas.Flush();
         GC.Collect();
@@ -81,6 +109,8 @@ internal static class RenderingVerification
             snapshot,
             frame,
             new ChartRenderOptions(ShowText: true, ShowAxes: true));
+        legendBuilder.Build(snapshot, snapshot.Candles.Length - 1, legend);
+        legendRenderer.Render(canvas, frame, legend);
         canvas.Flush();
 
         SKColor background = new(11, 15, 20);
@@ -97,6 +127,7 @@ internal static class RenderingVerification
                 $"Rendered image contained too few chart pixels: {changedSamples}.");
 
         Console.WriteLine($"render_allocated_bytes={allocated}");
+        Console.WriteLine($"legend_allocated_bytes={legendAllocated}");
         Console.WriteLine($"crosshair_allocated_bytes={crosshairAllocated}");
         Console.WriteLine($"render_changed_samples={changedSamples}");
         Console.WriteLine("csharp_rendering_verification=PASS");
