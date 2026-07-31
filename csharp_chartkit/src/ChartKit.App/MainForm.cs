@@ -20,7 +20,10 @@ internal sealed class MainForm : Form
     private readonly ChartLayoutOptions _layoutOptions = new();
     private readonly ChartRenderOptions _renderOptions = new(ShowText: true, ShowAxes: true);
     private readonly ChartCursorController _cursor = new();
+    private readonly ChartLegendBuilder _legendBuilder = new();
+    private readonly ChartLegendFrame _legendFrame = new();
     private readonly SkiaChartRenderer _renderer = new();
+    private readonly ChartLegendRenderer _legendRenderer = new();
     private readonly ChartCrosshairRenderer _crosshairRenderer = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly ComboBox _symbols = new();
@@ -76,6 +79,7 @@ internal sealed class MainForm : Form
                 _cursor.Clear();
                 if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
                     _viewport.Reset(snapshot.Candles.Length);
+                _chart.Focus();
                 _chart.Invalidate();
             }
         };
@@ -98,7 +102,6 @@ internal sealed class MainForm : Form
         _chart.MouseMove += OnChartMouseMove;
         _chart.MouseUp += OnChartMouseUp;
         _chart.MouseDoubleClick += OnChartMouseDoubleClick;
-        _chart.KeyDown += OnChartKeyDown;
         Controls.Add(_chart);
         Controls.Add(toolbar);
 
@@ -106,6 +109,13 @@ internal sealed class MainForm : Form
         _frameTimer.Tick += OnFrame;
         Shown += OnShown;
         FormClosed += OnFormClosed;
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        Keys keyCode = keyData & Keys.KeyCode;
+        if (!_symbols.Focused && HandleNavigationKey(keyCode)) return true;
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private async void OnShown(object? sender, EventArgs e)
@@ -128,6 +138,7 @@ internal sealed class MainForm : Form
                 _viewport.Reset(snapshot.Candles.Length);
             _status.Text = "C# realtime running";
             _frameTimer.Start();
+            _chart.Focus();
             _streamTask = Task.Run(PumpRealtimeAsync, CancellationToken.None);
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested)
@@ -179,6 +190,8 @@ internal sealed class MainForm : Form
             snapshot.Version != _lastVersion)
         {
             _lastVersion = snapshot.Version;
+            if (_cursor.Current.IsVisible)
+                UpdateCursor((int)_cursor.Current.X, (int)_cursor.Current.Y, snapshot);
             _chart.Invalidate();
         }
 
@@ -215,6 +228,12 @@ internal sealed class MainForm : Form
             snapshot,
             _chartFrame,
             _renderOptions);
+
+        int legendCandleIndex = _cursor.Current.IsVisible
+            ? _cursor.Current.CandleIndex
+            : snapshot.Candles.Length - 1;
+        _legendBuilder.Build(snapshot, legendCandleIndex, _legendFrame);
+        _legendRenderer.Render(e.Surface.Canvas, _chartFrame, _legendFrame);
         _crosshairRenderer.Render(
             e.Surface.Canvas,
             _chartFrame,
@@ -294,13 +313,16 @@ internal sealed class MainForm : Form
         _chart.Invalidate();
     }
 
-    private void OnChartKeyDown(object? sender, KeyEventArgs e)
+    private bool HandleNavigationKey(Keys keyCode)
     {
-        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return;
+        if (keyCode is not (Keys.Left or Keys.Right or Keys.PageUp or
+                            Keys.PageDown or Keys.Home or Keys.End or Keys.Escape))
+            return false;
+        if (!TryGetSelectedSnapshot(out SymbolSnapshot? snapshot)) return false;
+
         ChartWindow window = _viewport.Resolve(snapshot.Candles.Length);
         int page = Math.Max(1, window.Count / 2);
-
-        switch (e.KeyCode)
+        switch (keyCode)
         {
             case Keys.Left:
                 _viewport.Pan(1, snapshot.Candles.Length);
@@ -323,13 +345,11 @@ internal sealed class MainForm : Form
             case Keys.Escape:
                 _viewport.Reset(snapshot.Candles.Length);
                 break;
-            default:
-                return;
         }
 
         _cursor.Clear();
-        e.Handled = true;
         _chart.Invalidate();
+        return true;
     }
 
     private void UpdateCursor(int x, int y, SymbolSnapshot snapshot)
@@ -378,6 +398,7 @@ internal sealed class MainForm : Form
         _source.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _engine.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _crosshairRenderer.Dispose();
+        _legendRenderer.Dispose();
         _renderer.Dispose();
         _frameTimer.Dispose();
         _stop.Dispose();
