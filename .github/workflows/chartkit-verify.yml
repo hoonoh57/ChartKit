@@ -10,30 +10,34 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout improvement branch
         uses: actions/checkout@v4
+        with:
+          ref: improve/chart-engine-hardening
+          fetch-depth: 0
 
-      - name: Diagnose Kiwoom client structure
+      - name: Apply pending Kiwoom session patch
         shell: pwsh
         run: |
-          Write-Host "===REPOSITORY_FILES==="
-          Get-ChildItem -Recurse -File |
-            Where-Object { $_.FullName -notmatch '\\(bin|obj|\.git)\\' } |
-            ForEach-Object { $_.FullName.Substring($PWD.Path.Length + 1) }
-
-          Write-Host "===KIWOOM_HTTP_MATCHES==="
-          $patterns = @('Kiwoom','HttpClient','Authorization','access_token','token','429','TooManyRequests','SemaphoreSlim','Task.Delay','rate','throttle')
-          Get-ChildItem -Recurse -File -Include *.vb,*.json,*.md,*.yml,*.yaml |
-            Where-Object { $_.FullName -notmatch '\\(bin|obj|\.git)\\' } |
-            Select-String -Pattern $patterns -SimpleMatch |
-            ForEach-Object { "{0}:{1}: {2}" -f $_.Path.Substring($PWD.Path.Length + 1), $_.LineNumber, $_.Line.Trim() }
+          $source = Get-Content .\DataSources\KiwoomRestSource.vb -Raw
+          if ($source.Contains('Private _token As String')) {
+            .\.github\scripts\apply-kiwoom-session.ps1
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- DataSources/KiwoomApiSession.vb DataSources/KiwoomRestSource.vb
+            git commit -m "Centralize Kiwoom token and throttle"
+            git push origin HEAD:improve/chart-engine-hardening
+          }
+          else {
+            Write-Host 'Kiwoom session integration is already applied.'
+          }
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
