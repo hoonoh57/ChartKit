@@ -45,6 +45,44 @@ jobs:
         run: dotnet run --project .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj -c Release --no-build
       - name: Run CSharp application self-test
         run: dotnet run --project .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-build -- --self-test --count 120
+      - name: Run CSharp desktop shell smoke test
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:RUNNER_TEMP 'chartkit-ui-smoke.out.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'chartkit-ui-smoke.err.log'
+          $arguments = @(
+            'run',
+            '--project', '.\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj',
+            '-c', 'Release',
+            '--no-build',
+            '--',
+            '--replay',
+            '--symbols', 'S001,S002',
+            '--timeframe', '1m',
+            '--count', '120'
+          )
+          $process = Start-Process `
+            -FilePath 'dotnet' `
+            -ArgumentList $arguments `
+            -PassThru `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr | Write-Error }
+              throw "CSharp desktop shell exited during startup with code $($process.ExitCode)."
+            }
+            Write-Host 'csharp_desktop_shell_smoke=PASS'
+          }
+          finally {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+            }
+          }
 
       - name: Restore legacy parity verifier
         run: dotnet restore .\csharp_chartkit\migration\LegacyParity\LegacyParity.csproj
