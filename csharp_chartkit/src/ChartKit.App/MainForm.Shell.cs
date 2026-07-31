@@ -52,6 +52,7 @@ internal sealed partial class MainForm
     private ToolStripMenuItem? _contextCrosshair;
     private ToolStripMenuItem? _contextInfo;
     private bool _updatingShellControls;
+    private bool _workspaceSplitterInitialized;
 
     private void InitializeShell(IReadOnlyList<string> symbols)
     {
@@ -143,9 +144,8 @@ internal sealed partial class MainForm
         _workspaceSplit.Dock = DockStyle.Fill;
         _workspaceSplit.Orientation = Orientation.Vertical;
         _workspaceSplit.FixedPanel = FixedPanel.Panel2;
-        _workspaceSplit.Panel2MinSize = 220;
         _workspaceSplit.SplitterWidth = 4;
-        _workspaceSplit.SplitterDistance = 1120;
+        _workspaceSplit.Layout += OnWorkspaceSplitLayout;
         _workspaceSplit.Panel1.Controls.Add(_chart);
         BuildInstrumentInfoPanel();
         _workspaceSplit.Panel2.Controls.Add(_infoTable);
@@ -170,6 +170,38 @@ internal sealed partial class MainForm
         }
 
         ResumeLayout(performLayout: true);
+        InitializeWorkspaceSplitter();
+    }
+
+    private void OnWorkspaceSplitLayout(object? sender, LayoutEventArgs e) =>
+        InitializeWorkspaceSplitter();
+
+    private void InitializeWorkspaceSplitter()
+    {
+        if (_workspaceSplitterInitialized) return;
+
+        const int panel1Minimum = 320;
+        const int panel2Minimum = 220;
+        const int panel2Preferred = 260;
+        int availableWidth =
+            _workspaceSplit.ClientSize.Width - _workspaceSplit.SplitterWidth;
+        if (availableWidth < panel1Minimum + panel2Minimum) return;
+
+        _workspaceSplitterInitialized = true;
+        try
+        {
+            _workspaceSplit.Panel1MinSize = panel1Minimum;
+            _workspaceSplit.Panel2MinSize = panel2Minimum;
+            _workspaceSplit.SplitterDistance = Math.Clamp(
+                availableWidth - panel2Preferred,
+                panel1Minimum,
+                availableWidth - panel2Minimum);
+        }
+        catch
+        {
+            _workspaceSplitterInitialized = false;
+            throw;
+        }
     }
 
     private void BuildToolsMenu()
