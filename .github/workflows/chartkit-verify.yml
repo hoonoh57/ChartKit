@@ -27,18 +27,32 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          function Get-Includes([xml]$project, [string]$itemName) {
+            $includes = @()
+            foreach ($group in @($project.Project.ItemGroup)) {
+              foreach ($item in @($group.$itemName)) {
+                if ($null -eq $item) { continue }
+                $include = [string]$item.Include
+                if (-not [string]::IsNullOrWhiteSpace($include)) {
+                  $includes += $include
+                }
+              }
+            }
+            return $includes
+          }
+
           [xml]$demo = Get-Content .\ChartKit.vbproj -Raw
           [xml]$core = Get-Content .\src\ChartKit.Core\ChartKit.Core.vbproj -Raw
           [xml]$data = Get-Content .\src\ChartKit.DataSources\ChartKit.DataSources.vbproj -Raw
 
-          $demoCompile = @($demo.Project.ItemGroup.Compile | ForEach-Object { [string]$_.Include })
+          $demoCompile = @(Get-Includes $demo 'Compile')
           $expectedDemoCompile = @('DemoProgram.vb', 'UI\**\*.vb')
           if ($demoCompile.Count -ne $expectedDemoCompile.Count -or
               @($expectedDemoCompile | Where-Object { $_ -notin $demoCompile }).Count -gt 0) {
             throw "ChartKit demo compile boundary mismatch: $($demoCompile -join ', ')"
           }
 
-          $demoRefs = @($demo.Project.ItemGroup.ProjectReference | ForEach-Object { [string]$_.Include })
+          $demoRefs = @(Get-Includes $demo 'ProjectReference')
           $expectedDemoRefs = @(
             'src\ChartKit.Core\ChartKit.Core.vbproj',
             'src\ChartKit.DataSources\ChartKit.DataSources.vbproj'
@@ -48,7 +62,7 @@ jobs:
             throw "ChartKit demo references mismatch: $($demoRefs -join ', ')"
           }
 
-          $coreCompile = @($core.Project.ItemGroup.Compile | ForEach-Object { [string]$_.Include })
+          $coreCompile = @(Get-Includes $core 'Compile')
           foreach ($required in @(
             '..\..\Abstractions\**\*.vb',
             '..\..\Models\**\*.vb',
@@ -59,15 +73,15 @@ jobs:
               throw "ChartKit.Core missing compile boundary: $required"
             }
           }
-          if (@($core.Project.ItemGroup.ProjectReference).Count -gt 0) {
+          if (@(Get-Includes $core 'ProjectReference').Count -gt 0) {
             throw 'ChartKit.Core must not reference higher-level projects.'
           }
 
-          $dataCompile = @($data.Project.ItemGroup.Compile | ForEach-Object { [string]$_.Include })
+          $dataCompile = @(Get-Includes $data 'Compile')
           if ($dataCompile.Count -ne 1 -or $dataCompile[0] -ne '..\..\DataSources\**\*.vb') {
             throw "ChartKit.DataSources compile boundary mismatch: $($dataCompile -join ', ')"
           }
-          $dataRefs = @($data.Project.ItemGroup.ProjectReference | ForEach-Object { [string]$_.Include })
+          $dataRefs = @(Get-Includes $data 'ProjectReference')
           if ($dataRefs.Count -ne 1 -or $dataRefs[0] -ne '..\ChartKit.Core\ChartKit.Core.vbproj') {
             throw "ChartKit.DataSources reference mismatch: $($dataRefs -join ', ')"
           }
