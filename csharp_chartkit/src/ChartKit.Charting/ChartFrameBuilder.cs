@@ -261,30 +261,60 @@ public sealed class ChartFrameBuilder
 
             double rawStep = range.Span / Math.Max(1, targetCount - 1);
             double step = NiceStep(rawStep);
-            double first = Math.Ceiling(range.Minimum / step) * step;
             int count = 0;
-            float previous = float.NaN;
-            for (double value = first;
-                 value <= range.Maximum + step * 0.25d &&
-                 count < ChartFrame.MaximumAxisTickCount;
-                 value += step)
+            for (int attempt = 0; attempt < 6; attempt++)
             {
-                float tickValue = (float)value;
-                if (!float.IsFinite(tickValue) ||
-                    tickValue < range.Minimum || tickValue > range.Maximum)
-                    continue;
-                if (float.IsFinite(previous) && tickValue <= previous) continue;
+                count = WritePanelTicks(frame, panel, range, rect, step);
+                if (count >= 2) break;
+                step = NiceStep(step * 0.5d);
+            }
 
+            if (count < 2)
+            {
                 frame.SetPanelTick(
                     panel,
-                    count++,
-                    new NumericAxisTick(
-                        tickValue,
-                        ChartFrame.MapY(tickValue, range, rect)));
-                previous = tickValue;
+                    0,
+                    new NumericAxisTick(range.Minimum, rect.Bottom));
+                frame.SetPanelTick(
+                    panel,
+                    1,
+                    new NumericAxisTick(range.Maximum, rect.Top));
+                count = 2;
             }
             frame.PanelTickCounts[panel] = count;
         }
+    }
+
+    private static int WritePanelTicks(
+        ChartFrame frame,
+        int panel,
+        NumericRange range,
+        ChartRectF rect,
+        double step)
+    {
+        double first = Math.Ceiling(range.Minimum / step) * step;
+        int count = 0;
+        float previous = float.NaN;
+        for (double value = first;
+             value <= range.Maximum + step * 0.25d &&
+             count < ChartFrame.MaximumAxisTickCount;
+             value += step)
+        {
+            float tickValue = (float)value;
+            if (!float.IsFinite(tickValue) ||
+                tickValue < range.Minimum || tickValue > range.Maximum)
+                continue;
+            if (float.IsFinite(previous) && tickValue <= previous) continue;
+
+            frame.SetPanelTick(
+                panel,
+                count++,
+                new NumericAxisTick(
+                    tickValue,
+                    ChartFrame.MapY(tickValue, range, rect)));
+            previous = tickValue;
+        }
+        return count;
     }
 
     private static double NiceStep(double rawStep)
