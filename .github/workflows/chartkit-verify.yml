@@ -10,34 +10,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout improvement branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: improve/chart-engine-hardening
-          fetch-depth: 0
-
-      - name: Apply pending Kiwoom session patch
-        shell: pwsh
-        run: |
-          $source = Get-Content .\DataSources\KiwoomRestSource.vb -Raw
-          if ($source.Contains('Private _token As String')) {
-            .\.github\scripts\apply-kiwoom-session.ps1
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -- DataSources/KiwoomApiSession.vb DataSources/KiwoomRestSource.vb
-            git commit -m "Centralize Kiwoom token and throttle"
-            git push origin HEAD:improve/chart-engine-hardening
-          }
-          else {
-            Write-Host 'Kiwoom session integration is already applied.'
-          }
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
@@ -70,3 +51,6 @@ jobs:
 
       - name: Verify rendering allocation bounds
         run: dotnet run --project .\Tests\RenderingAllocationVerification\VerifyRenderingAllocation.vbproj -c Release --no-build
+
+      - name: Verify Kiwoom session coordination
+        run: dotnet run --project .\Tests\KiwoomSessionVerification\VerifyKiwoomSession.vbproj -c Release --no-build
