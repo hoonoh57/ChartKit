@@ -113,7 +113,7 @@ internal sealed class ScriptedKiwoomWebSocket : IKiwoomWebSocket
         if (bytes.Length > buffer.Length)
             throw new InvalidOperationException(
                 $"Scripted frame length {bytes.Length} exceeds buffer {buffer.Length}.");
-        bytes.CopyTo(buffer);
+        bytes.AsSpan().CopyTo(buffer.Span);
         return new ValueWebSocketReceiveResult(
             bytes.Length,
             WebSocketMessageType.Text,
