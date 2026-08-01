@@ -17,6 +17,7 @@ try
     SmaModuleParityVerification.Run();
     RsiModuleParityVerification.Run();
     MacdModuleParityVerification.Run();
+    SuperTrendModuleParityVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     await RenderPlanRenderingVerification.RunAsync();
