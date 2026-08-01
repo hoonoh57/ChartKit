@@ -3,6 +3,9 @@ using ChartKit.CSharp.Contracts;
 using ChartKit.CSharp.DataSources;
 using ChartKit.CSharp.Engine;
 using ChartKit.CSharp.Modules.Abstractions;
+using ChartKit.CSharp.Modules.Indicators;
+using ChartKit.CSharp.Modules.Platform;
+using ChartKit.CSharp.Scene;
 using ChartKit.CSharp.UiModel;
 
 namespace ChartKit.CSharp.App;
@@ -120,6 +123,7 @@ internal static class ConsoleModes
             Path.GetTempPath(),
             "chartkit-app-module-self-test-" + Guid.NewGuid().ToString("N"));
         string profilePath = Path.Combine(directory, "chart-profile.json");
+        ChartPrimarySeriesSnapshot primary = CreateSmaPrimarySeries();
 
         try
         {
@@ -128,17 +132,26 @@ internal static class ConsoleModes
                 await controller.InitializeAsync(timeframe.ToString());
                 ChartUiCatalogSnapshot initial = controller.BuildUiCatalog();
                 ChartUiCommandItem toggle = initial.ContextMenuItems.Single(
-                    static item => item.Kind == ChartUiCommandKind.ModuleToggle);
+                    static item =>
+                        item.Kind == ChartUiCommandKind.ModuleToggle &&
+                        item.Owner.ModuleId == PlatformProbeModule.Definition.ModuleId);
                 ChartUiCommandItem inspect = initial.QuickToolbarItems.Single(
-                    static item => item.Kind == ChartUiCommandKind.ModuleCommand);
+                    static item =>
+                        item.Kind == ChartUiCommandKind.ModuleCommand &&
+                        item.Owner.ModuleId == PlatformProbeModule.Definition.ModuleId);
+                ChartUiCommandItem smaToggle = initial.ContextMenuItems.Single(
+                    static item =>
+                        item.Kind == ChartUiCommandKind.ModuleToggle &&
+                        item.Owner.ModuleId == SmaModule.Definition.ModuleId);
 
-                if (initial.ContextMenuItems.Count < 2 ||
-                    !initial.ContextMenuItems.Contains(toggle))
+                if (initial.ContextMenuItems.Count < 4 ||
+                    !initial.ContextMenuItems.Contains(toggle) ||
+                    !initial.ContextMenuItems.Contains(smaToggle))
                 {
                     throw new InvalidOperationException(
                         "App module context-menu projection failed.");
                 }
-                if (initial.QuickToolbarItems.Count < 2 ||
+                if (initial.QuickToolbarItems.Count < 4 ||
                     !initial.QuickToolbarItems.Contains(inspect))
                 {
                     throw new InvalidOperationException(
@@ -150,8 +163,6 @@ internal static class ConsoleModes
                 if (!enabled.Succeeded || !enabled.Changed)
                     throw new InvalidOperationException("App module toggle failed.");
 
-                // Toggle already selects its owner. Inspect may therefore be an
-                // idempotent no-op; final owner identity is the actual contract.
                 ChartModulePlatformActionResult selected =
                     await controller.ExecuteCommandAsync(inspect);
                 if (!selected.Succeeded)
@@ -194,6 +205,40 @@ internal static class ConsoleModes
                         "App module render-plan recomposition failed.");
                 }
 
+                ChartModulePlatformActionResult smaEnabled =
+                    await controller.ExecuteCommandAsync(smaToggle);
+                if (!smaEnabled.Succeeded || !smaEnabled.Changed)
+                    throw new InvalidOperationException("App SMA toggle failed.");
+
+                await controller.UpdatePrimarySeriesAsync(
+                    primary,
+                    viewportVersion: 1,
+                    themeVersion: 0,
+                    visibleStartIndex: 0,
+                    visibleEndExclusive: primary.Bars.Count);
+                RenderPrimitivePlan smaPlan = controller.RenderPlan.Primitives.Single(
+                    static item =>
+                        item.Identity.ModuleId == SmaModule.Definition.ModuleId);
+                AssertLastSma(smaPlan, 129.5d, "period 20");
+
+                ChartPropertyChangeResult periodChanged =
+                    await controller.ChangePropertyAsync(
+                        smaToggle.Owner.InstanceId,
+                        "period",
+                        JsonValue.Create(5));
+                if (!periodChanged.Succeeded ||
+                    !periodChanged.Changed ||
+                    periodChanged.ChangeImpact !=
+                        ChartChangeImpact.RecalculateModule)
+                {
+                    throw new InvalidOperationException(
+                        "App SMA period mutation failed.");
+                }
+                smaPlan = controller.RenderPlan.Primitives.Single(
+                    static item =>
+                        item.Identity.ModuleId == SmaModule.Definition.ModuleId);
+                AssertLastSma(smaPlan, 137d, "period 5");
+
                 await controller.UpdateShellProfileAsync(
                     timeframe.ToString(),
                     new JsonObject
@@ -218,9 +263,16 @@ internal static class ConsoleModes
                     restored.BuildUiCatalog();
                 ChartUiCommandItem restoredToggle =
                     restoredCatalog.ContextMenuItems.Single(
-                        static item => item.Kind ==
-                            ChartUiCommandKind.ModuleToggle);
-                if (!restoredToggle.IsChecked)
+                        static item =>
+                            item.Kind == ChartUiCommandKind.ModuleToggle &&
+                            item.Owner.ModuleId ==
+                                PlatformProbeModule.Definition.ModuleId);
+                ChartUiCommandItem restoredSmaToggle =
+                    restoredCatalog.ContextMenuItems.Single(
+                        static item =>
+                            item.Kind == ChartUiCommandKind.ModuleToggle &&
+                            item.Owner.ModuleId == SmaModule.Definition.ModuleId);
+                if (!restoredToggle.IsChecked || !restoredSmaToggle.IsChecked)
                     throw new InvalidOperationException(
                         "App module enabled state was not restored.");
 
@@ -238,6 +290,29 @@ internal static class ConsoleModes
                     throw new InvalidOperationException(
                         "App module profile round-trip failed.");
                 }
+
+                restored.Select(restoredSmaToggle.Owner);
+                ChartUiPropertyItem restoredPeriod = restored
+                    .BuildUiCatalog()
+                    .InspectorProperties
+                    .Single(static item =>
+                        item.Descriptor.PropertyId == "period");
+                if (Convert.ToInt32(restoredPeriod.Descriptor.Value) != 5)
+                    throw new InvalidOperationException(
+                        "App SMA period was not restored.");
+
+                await restored.UpdatePrimarySeriesAsync(
+                    primary,
+                    viewportVersion: 1,
+                    themeVersion: 0,
+                    visibleStartIndex: 0,
+                    visibleEndExclusive: primary.Bars.Count);
+                RenderPrimitivePlan restoredSma =
+                    restored.RenderPlan.Primitives.Single(
+                        static item =>
+                            item.Identity.ModuleId ==
+                                SmaModule.Definition.ModuleId);
+                AssertLastSma(restoredSma, 137d, "restored period 5");
             }
 
             Console.WriteLine("csharp_app_module_profile_load=PASS");
@@ -246,11 +321,45 @@ internal static class ConsoleModes
             Console.WriteLine("csharp_app_module_property_inspector=PASS");
             Console.WriteLine("csharp_app_module_property_roundtrip=PASS");
             Console.WriteLine("csharp_app_module_render_plan=PASS");
+            Console.WriteLine("csharp_app_sma_module_data=PASS");
+            Console.WriteLine("csharp_app_sma_module_period=PASS");
+            Console.WriteLine("csharp_app_sma_module_roundtrip=PASS");
         }
         finally
         {
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static ChartPrimarySeriesSnapshot CreateSmaPrimarySeries()
+    {
+        var bars = new ChartPrimaryBar[40];
+        for (int index = 0; index < bars.Length; index++)
+        {
+            double close = 100d + index;
+            bars[index] = new ChartPrimaryBar(
+                index,
+                close - 0.5d,
+                close + 1d,
+                close - 1d,
+                close,
+                1_000L + index,
+                true);
+        }
+        return new ChartPrimarySeriesSnapshot(100, bars);
+    }
+
+    private static void AssertLastSma(
+        RenderPrimitivePlan plan,
+        double expected,
+        string context)
+    {
+        double actual = plan.Points[^1].Y;
+        if (Math.Abs(actual - expected) > 0.0001d)
+        {
+            throw new InvalidOperationException(
+                $"App SMA {context} mismatch: expected={expected}, actual={actual}.");
         }
     }
 }
