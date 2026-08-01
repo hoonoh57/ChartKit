@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using ChartKit.CSharp.Contracts;
 
 namespace ChartKit.CSharp.DataSources;
@@ -85,7 +86,7 @@ public sealed partial class KiwoomRestDataSource :
 
     private bool TryGetRealtimeDiagnosticsState(
         string symbol,
-        out RealtimeDiagnosticsState? state) =>
+        [NotNullWhen(true)] out RealtimeDiagnosticsState? state) =>
         _realtimeDiagnostics.TryGetValue(symbol, out state);
 
     private void SetRealtimeConnectionState(
