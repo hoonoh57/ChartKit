@@ -5,6 +5,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ChartKit.Charting\ChartKit.Charting.csproj" />
     <ProjectReference Include="..\ChartKit.Contracts\ChartKit.Contracts.csproj" />
+    <ProjectReference Include="..\ChartKit.Scene\ChartKit.Scene.csproj" />
     <PackageReference Include="SkiaSharp" Version="2.88.8" />
   </ItemGroup>
 </Project>
