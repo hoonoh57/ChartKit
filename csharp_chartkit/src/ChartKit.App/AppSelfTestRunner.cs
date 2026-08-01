@@ -5,6 +5,7 @@ internal static class AppSelfTestRunner
     public static async Task<int> RunAsync(AppOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        await VwapModuleAppVerification.RunAsync(options.Timeframe);
         await DisparityModuleAppVerification.RunAsync(options.Timeframe);
         await ObvModuleAppVerification.RunAsync(options.Timeframe);
         await JmaModuleAppVerification.RunAsync(options.Timeframe);
