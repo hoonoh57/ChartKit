@@ -1,1 +1,1 @@
-global using Engine = ChartKit.CSharp.Engine;
+global using Engine = ChartKit.CSharp.Contracts;
