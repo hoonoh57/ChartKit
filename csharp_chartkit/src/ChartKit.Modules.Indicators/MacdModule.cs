@@ -7,7 +7,7 @@
 // Data-Requirements: PrimarySymbol.OHLCV
 // Capabilities: DataRequirements, Computation, Visual, Properties, Commands
 // Contributions: Polyline, Histogram
-// Default-Panel: indicator.4
+// Default-Panel: indicator.7
 // Renderer-Path: ContributionSet -> SceneCompiler -> ChartRenderPlan -> SkiaChartRenderer
 // UI-Path: CommandDescriptor/PropertyDescriptor -> ContextMenu/QuickButton/PropertyInspector
 // Persistence: ChartModuleProfile.Parameters, ChartModuleProfile.Style
@@ -31,7 +31,9 @@ public sealed class MacdModule :
     public const string MacdObjectId = "macd.value";
     public const string SignalObjectId = "macd.signal";
     public const string HistogramObjectId = "macd.histogram";
+    public const string DefaultPanelId = "indicator.7";
 
+    private const string LegacyIncorrectPanelId = "indicator.4";
     private const int DefaultFast = 12;
     private const int DefaultSlow = 26;
     private const int DefaultSignal = 9;
@@ -61,7 +63,7 @@ public sealed class MacdModule :
         displayName: "MACD",
         category: "Indicators",
         description: "Moving Average Convergence Divergence with signal and histogram.",
-        defaultPanelId: "indicator.4",
+        defaultPanelId: DefaultPanelId,
         defaultEnabled: false,
         schemaVersion: 1,
         capabilities:
@@ -103,7 +105,7 @@ public sealed class MacdModule :
             throw new InvalidOperationException(
                 "MACD slow period must be greater than fast period.");
 
-        _panelId = RequireText(profile.Placement, nameof(profile.Placement));
+        _panelId = NormalizePanelId(profile.Placement);
         _zIndex = profile.ZIndex;
         _fastPeriod = fast;
         _slowPeriod = slow;
@@ -287,6 +289,14 @@ public sealed class MacdModule :
             value,
             ChartChangeImpact.RedrawOnly,
             ChartPropertyStorage.Style);
+
+    private static string NormalizePanelId(string value)
+    {
+        string panelId = RequireText(value, nameof(ChartModuleProfile.Placement));
+        return StringComparer.Ordinal.Equals(panelId, LegacyIncorrectPanelId)
+            ? DefaultPanelId
+            : panelId;
+    }
 
     private static int ReadPeriod(JsonObject source, string key, int fallback)
     {
