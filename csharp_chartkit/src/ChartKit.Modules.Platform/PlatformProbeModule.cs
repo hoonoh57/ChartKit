@@ -28,11 +28,13 @@ public sealed class PlatformProbeModule :
 {
     private const double DefaultLevel = 50.0;
     private const double DefaultAmplitude = 5.0;
+    private const string DefaultStroke = "accent";
 
     private string? _panelId;
     private int _zIndex;
     private double _level = DefaultLevel;
     private double _amplitude = DefaultAmplitude;
+    private string _stroke = DefaultStroke;
     private bool _isActive;
 
     private PlatformProbeModule(string instanceId)
@@ -80,6 +82,8 @@ public sealed class PlatformProbeModule :
             throw new InvalidOperationException("Module schema mismatch.");
         if (profile.Parameters is null)
             throw new ArgumentNullException(nameof(profile.Parameters));
+        if (profile.Style is null)
+            throw new ArgumentNullException(nameof(profile.Style));
 
         _panelId = RequireText(profile.Placement, nameof(profile.Placement));
         _zIndex = profile.ZIndex;
@@ -93,6 +97,7 @@ public sealed class PlatformProbeModule :
             "amplitude",
             DefaultAmplitude,
             minimum: 0.0);
+        _stroke = ReadText(profile.Style, "stroke", DefaultStroke);
     }
 
     public void Activate()
@@ -115,6 +120,7 @@ public sealed class PlatformProbeModule :
         _zIndex = 0;
         _level = DefaultLevel;
         _amplitude = DefaultAmplitude;
+        _stroke = DefaultStroke;
     }
 
     public void BuildContributions(
@@ -148,14 +154,27 @@ public sealed class PlatformProbeModule :
             "level",
             "Level",
             "Platform Probe",
+            ChartPropertyValueKind.Decimal,
             _level,
-            ChartChangeImpact.RebuildVisuals));
+            ChartChangeImpact.RebuildVisuals,
+            ChartPropertyStorage.Parameters));
         writer.Add(new ChartPropertyDescriptor(
             "amplitude",
             "Amplitude",
             "Platform Probe",
+            ChartPropertyValueKind.Decimal,
             _amplitude,
-            ChartChangeImpact.RebuildVisuals));
+            ChartChangeImpact.RebuildVisuals,
+            ChartPropertyStorage.Parameters,
+            minimum: 0.0));
+        writer.Add(new ChartPropertyDescriptor(
+            "stroke",
+            "Stroke",
+            "Platform Probe",
+            ChartPropertyValueKind.Color,
+            _stroke,
+            ChartChangeImpact.RedrawOnly,
+            ChartPropertyStorage.Style));
     }
 
     public void DescribeCommands(IChartCommandWriter writer)
@@ -168,6 +187,7 @@ public sealed class PlatformProbeModule :
             "Platform",
             false,
             ChartCommandPlacement.ContextMenu |
+            ChartCommandPlacement.QuickToolbar |
             ChartCommandPlacement.PropertyInspector));
     }
 
@@ -208,6 +228,28 @@ public sealed class PlatformProbeModule :
                 $"Parameter '{key}' must be at least {minimum.Value}.");
 
         return value;
+    }
+
+    private static string ReadText(
+        JsonObject source,
+        string key,
+        string fallback)
+    {
+        if (!source.TryGetPropertyValue(key, out JsonNode? node) ||
+            node is null)
+        {
+            return fallback;
+        }
+
+        if (node is JsonValue value &&
+            value.TryGetValue(out string? result) &&
+            !string.IsNullOrWhiteSpace(result))
+        {
+            return result.Trim();
+        }
+
+        throw new InvalidOperationException(
+            $"Property '{key}' must be a non-empty string.");
     }
 
     private static string RequireText(string value, string parameterName) =>
