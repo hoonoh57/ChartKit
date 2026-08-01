@@ -1,4 +1,4 @@
-[CmdletBinding]
+[CmdletBinding()]
 param(
     [string]$SourceRoot = ".\csharp_chartkit\src"
 )
