@@ -37,6 +37,27 @@ jobs:
           }
           Write-Host 'csharp_product_boundary=PASS'
 
+      - name: Reject DataSources row-reordering APIs
+        shell: pwsh
+        run: |
+          $patterns = @(
+            '\.Sort\s*\(',
+            'Array\.Sort\s*\(',
+            '\bOrderBy\s*\(',
+            '\bThenBy\s*\(',
+            '\bSortedDictionary\s*<'
+          )
+          $matches = Get-ChildItem .\csharp_chartkit\src\ChartKit.DataSources `
+              -Recurse -Filter *.cs |
+            Select-String -Pattern $patterns
+          if ($matches) {
+            $matches | ForEach-Object {
+              Write-Error "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
+            }
+            throw 'DataSources must preserve provider array order. Only explicit whole-array reversal is allowed.'
+          }
+          Write-Host 'csharp_datasources_no_row_sort=PASS'
+
       - name: Restore CSharp product solution
         run: dotnet restore .\csharp_chartkit\ChartKit.CSharp.sln
       - name: Build CSharp product solution
