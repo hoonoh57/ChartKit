@@ -152,11 +152,17 @@ internal static class ConsoleModes
 
                 ChartModulePlatformActionResult selected =
                     await controller.ExecuteCommandAsync(inspect);
-                if (!selected.Succeeded || !selected.Changed)
+                if (!selected.Succeeded)
                     throw new InvalidOperationException("App module selection failed.");
 
                 ChartUiCatalogSnapshot selectedCatalog =
                     controller.BuildUiCatalog();
+                if (!selectedCatalog.Selection.HasValue ||
+                    !selectedCatalog.Selection.Value.Equals(inspect.Owner))
+                {
+                    throw new InvalidOperationException(
+                        "App module selection owner mismatch.");
+                }
                 if (selectedCatalog.InspectorProperties.Count != 3 ||
                     !selectedCatalog.InspectorProperties
                         .Select(static item => item.Descriptor.PropertyId)
