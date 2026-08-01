@@ -6,19 +6,44 @@ internal sealed partial class MainForm
 {
     private TradingDayProbeSnapshot _tradingDayProbe =
         TradingDayProbeSnapshot.Empty(DateTime.Today);
+    private int _tradingDayProbeRunning;
 
-    private async Task RefreshTradingDayProbeAsync()
+    private void EnsureTradingDayProbeStarted()
     {
         DateTime today = DateTime.Today;
-        if (_source is not ITradingDayProbeSource probeSource)
-        {
-            _tradingDayProbe = TradingDayProbeSnapshot.Empty(today);
+        if (_tradingDayProbe.TradingDate == today &&
+            _tradingDayProbe.CheckedAtUtc != DateTimeOffset.MinValue)
             return;
-        }
+        if (Interlocked.CompareExchange(
+                ref _tradingDayProbeRunning,
+                1,
+                0) != 0)
+            return;
 
-        _tradingDayProbe = await probeSource.ProbeTradingDayAsync(
-            today,
-            _stop.Token);
+        _ = RunTradingDayProbeAsync(today);
+    }
+
+    private async Task RunTradingDayProbeAsync(DateTime today)
+    {
+        try
+        {
+            if (_source is not ITradingDayProbeSource probeSource)
+            {
+                _tradingDayProbe = TradingDayProbeSnapshot.Empty(today);
+                return;
+            }
+
+            _tradingDayProbe = await probeSource.ProbeTradingDayAsync(
+                today,
+                _stop.Token);
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _tradingDayProbeRunning, 0);
+        }
     }
 
     private TradingDayProbeState GetEffectiveTradingDayState(
