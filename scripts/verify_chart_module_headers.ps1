@@ -69,10 +69,10 @@ foreach ($file in $moduleFiles) {
     $expectedClass = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
 
     if ($header -notmatch '(?m)^// <chart-module>\s*$') {
-        $errors.Add("$relativePath: missing // <chart-module> in first 80 lines")
+        $errors.Add("${relativePath}: missing // <chart-module> in first 80 lines")
     }
     if ($header -notmatch '(?m)^// </chart-module>\s*$') {
-        $errors.Add("$relativePath: missing // </chart-module> in first 80 lines")
+        $errors.Add("${relativePath}: missing // </chart-module> in first 80 lines")
     }
 
     $metadata = @{}
@@ -85,47 +85,47 @@ foreach ($file in $moduleFiles) {
     foreach ($key in $requiredKeys) {
         if (-not $metadata.ContainsKey($key) -or
             [string]::IsNullOrWhiteSpace([string]$metadata[$key])) {
-            $errors.Add("$relativePath: missing or empty header key '$key'")
+            $errors.Add("${relativePath}: missing or empty header key '$key'")
         }
     }
 
     if ($metadata.ContainsKey("Module-Class") -and
         $metadata["Module-Class"] -ne $expectedClass) {
         $errors.Add(
-            "$relativePath: Module-Class '$($metadata["Module-Class"])' " +
+            "${relativePath}: Module-Class '$($metadata["Module-Class"])' " +
             "must match file/class '$expectedClass'")
     }
 
     if ($metadata.ContainsKey("Renderer-Path") -and
         $metadata["Renderer-Path"] -ne $expectedRendererPath) {
         $errors.Add(
-            "$relativePath: Renderer-Path must be exactly '$expectedRendererPath'")
+            "${relativePath}: Renderer-Path must be exactly '$expectedRendererPath'")
     }
 
     $classPattern =
         "(?s)\bclass\s+" + [regex]::Escape($expectedClass) +
         "\b.*?:.*?\bIChartModule\b"
     if ($content -notmatch $classPattern) {
-        $errors.Add("$relativePath: $expectedClass must implement IChartModule")
+        $errors.Add("${relativePath}: $expectedClass must implement IChartModule")
     }
 
     if ($content -notmatch
         '\bstatic\s+ChartModuleDefinition\s+Definition\b') {
         $errors.Add(
-            "$relativePath: missing static ChartModuleDefinition Definition")
+            "${relativePath}: missing static ChartModuleDefinition Definition")
     }
 
     if ($content -notmatch
         '\bChartModuleDefinition\s+ModuleDefinition\b') {
         $errors.Add(
-            "$relativePath: missing public ModuleDefinition exposure")
+            "${relativePath}: missing public ModuleDefinition exposure")
     }
 
     foreach ($pattern in $forbiddenPatterns) {
         $matchesFound = [regex]::Matches($content, $pattern)
         if ($matchesFound.Count -gt 0) {
             $errors.Add(
-                "$relativePath: forbidden renderer/UI dependency matched '$pattern'")
+                "${relativePath}: forbidden renderer/UI dependency matched '$pattern'")
         }
     }
 }
