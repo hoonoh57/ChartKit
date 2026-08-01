@@ -112,6 +112,7 @@ internal sealed partial class MainForm
             Candle candle = snapshot.Candles[index];
             bars[index] = new ChartPrimaryBar(
                 candle.Sequence,
+                DateOnly.FromDateTime(candle.TradingDate),
                 candle.Open,
                 candle.High,
                 candle.Low,
