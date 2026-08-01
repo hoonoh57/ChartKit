@@ -1,3 +1,4 @@
+using System.Reflection;
 using ChartKit.CSharp.Modules.Abstractions;
 using ChartKit.CSharp.Scene;
 
@@ -76,11 +77,30 @@ internal static class ModulePlatformContractVerification
         if (!duplicateRejected)
             throw new InvalidOperationException("Duplicate object identity was accepted.");
 
+#if RELEASE
+        VerifyReleaseAssembly(typeof(IChartModule).Assembly);
+        VerifyReleaseAssembly(typeof(SceneCompiler).Assembly);
+        Console.WriteLine("csharp_module_platform_release_configuration=PASS");
+#endif
+
         Console.WriteLine("csharp_module_definition_contract=PASS");
         Console.WriteLine("csharp_scene_disabled_module_zero=PASS");
         Console.WriteLine("csharp_scene_deterministic_order=PASS");
         Console.WriteLine("csharp_scene_owner_identity=PASS");
         Console.WriteLine("csharp_module_platform_contracts=PASS");
+    }
+
+    private static void VerifyReleaseAssembly(Assembly assembly)
+    {
+        string? configuration = assembly
+            .GetCustomAttribute<AssemblyConfigurationAttribute>()?
+            .Configuration;
+        if (!string.Equals(configuration, "Release", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"{assembly.GetName().Name} was loaded from configuration " +
+                $"'{configuration ?? "<missing>"}' instead of Release.");
+        }
     }
 
     private static ChartContribution NewContribution(
