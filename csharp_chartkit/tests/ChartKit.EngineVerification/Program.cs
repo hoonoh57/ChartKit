@@ -10,6 +10,7 @@ try
     ChartPanelAxisVerification.Run();
     ChartCursorVerification.Run();
     ModulePlatformContractVerification.Run();
+    ModuleHostVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     MarketDataNormalizerVerification.Run();

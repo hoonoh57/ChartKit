@@ -127,6 +127,23 @@ docs/chart-module-platform/templates/ChartModule.template.cs
 scripts/verify_chart_module_headers.ps1
 ```
 
+### 5. `module-registry-host-standard.md` — P1-B 구현 표준
+
+다음을 실제 코드 계약으로 고정한다.
+
+- `IChartModuleFactory<TModule>` 정적 팩토리
+- `registry.Register<TModule>()` 단일 등록 방식
+- `ModuleId` 중복·미등록 생성 차단
+- `ChartModuleHost`의 Initialize·ApplyProfile·Activate·Deactivate·Reset 순서
+- 범용 `SetModuleEnabledCommand`
+- 동일 On/Off 상태의 lifecycle 중복 호출 차단
+- 비활성 모듈 `BuildContributions` 호출 0
+- Contribution 소유권과 Primitive 선언 검사
+- 모듈별 fault 격리와 RuntimeSnapshot
+- Profile 방어 복사
+
+신규 기능 파일의 템플릿과 CI 검사는 이 Registry·Host 계약과 동일해야 한다.
+
 ## 변경 절차
 
 Baseline 1.0 이후 다음 변경은 근거 없이 허용하지 않는다.
@@ -164,6 +181,8 @@ CI 보호 규칙 변경
 [ ] 독립 <Feature>Module.cs 진입 파일
 [ ] 파일 상단 <chart-module> 연결 계약
 [ ] ModuleDefinition과 헤더 값 일치
+[ ] IChartModuleFactory<TModule> 구현
+[ ] static Create(string instanceId)
 [ ] 독립 설정 모델
 [ ] Property Schema
 [ ] Command Descriptor

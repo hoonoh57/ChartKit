@@ -40,10 +40,36 @@ public sealed record ChartModuleDefinition
         int schemaVersion,
         ChartModuleCapabilities capabilities,
         IReadOnlyList<ChartPrimitiveKind> supportedPrimitiveKinds)
+        : this(
+            moduleId,
+            displayName,
+            category,
+            displayName,
+            "price.main",
+            false,
+            schemaVersion,
+            capabilities,
+            supportedPrimitiveKinds)
+    {
+    }
+
+    public ChartModuleDefinition(
+        string moduleId,
+        string displayName,
+        string category,
+        string description,
+        string defaultPanelId,
+        bool defaultEnabled,
+        int schemaVersion,
+        ChartModuleCapabilities capabilities,
+        IReadOnlyList<ChartPrimitiveKind> supportedPrimitiveKinds)
     {
         ModuleId = RequireText(moduleId, nameof(moduleId));
         DisplayName = RequireText(displayName, nameof(displayName));
         Category = RequireText(category, nameof(category));
+        Description = RequireText(description, nameof(description));
+        DefaultPanelId = RequireText(defaultPanelId, nameof(defaultPanelId));
+        DefaultEnabled = defaultEnabled;
         if (schemaVersion < 1)
             throw new ArgumentOutOfRangeException(nameof(schemaVersion));
         SchemaVersion = schemaVersion;
@@ -56,6 +82,9 @@ public sealed record ChartModuleDefinition
     public string ModuleId { get; }
     public string DisplayName { get; }
     public string Category { get; }
+    public string Description { get; }
+    public string DefaultPanelId { get; }
+    public bool DefaultEnabled { get; }
     public int SchemaVersion { get; }
     public ChartModuleCapabilities Capabilities { get; }
     public IReadOnlyList<ChartPrimitiveKind> SupportedPrimitiveKinds { get; }
@@ -88,6 +117,13 @@ public interface IChartModule
     void Activate();
     void Deactivate();
     void Reset();
+}
+
+public interface IChartModuleFactory<TModule>
+    where TModule : class, IChartModule
+{
+    static abstract ChartModuleDefinition Definition { get; }
+    static abstract TModule Create(string instanceId);
 }
 
 public interface IChartModuleContext
