@@ -285,13 +285,13 @@ public sealed class ChartPropertyMutationService
         return descriptor.ValueKind switch
         {
             ChartPropertyValueKind.Boolean =>
-                JsonValue.Create(ReadBoolean(node, descriptor.PropertyId)),
+                CreateJsonValue(ReadBoolean(node, descriptor.PropertyId)),
             ChartPropertyValueKind.Integer =>
-                JsonValue.Create(ValidateInteger(
+                CreateJsonValue(ValidateInteger(
                     ReadInteger(node, descriptor.PropertyId),
                     descriptor)),
             ChartPropertyValueKind.Decimal =>
-                JsonValue.Create(ValidateDecimal(
+                CreateJsonValue(ValidateDecimal(
                     ReadDecimal(node, descriptor.PropertyId),
                     descriptor)),
             ChartPropertyValueKind.String or
@@ -302,7 +302,7 @@ public sealed class ChartPropertyMutationService
             ChartPropertyValueKind.Timeframe or
             ChartPropertyValueKind.PanelId or
             ChartPropertyValueKind.Formula =>
-                JsonValue.Create(ValidateString(
+                CreateJsonValue(ValidateString(
                     ReadString(node, descriptor.PropertyId),
                     descriptor)),
             ChartPropertyValueKind.DateRange or
@@ -314,6 +314,11 @@ public sealed class ChartPropertyMutationService
                 "Unsupported chart property value kind.")
         };
     }
+
+    private static JsonNode CreateJsonValue<T>(T value)
+        where T : notnull =>
+        JsonValue.Create(value) ??
+        throw new InvalidOperationException("Failed to create JSON property value.");
 
     private static bool ReadBoolean(JsonNode node, string propertyId)
     {
@@ -349,6 +354,8 @@ public sealed class ChartPropertyMutationService
                 return doubleValue;
             if (value.TryGetValue(out decimal decimalValue))
                 return (double)decimalValue;
+            if (value.TryGetValue(out int intValue))
+                return intValue;
             if (value.TryGetValue(out long longValue))
                 return longValue;
         }
