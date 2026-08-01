@@ -1,8 +1,9 @@
 # ChartKit 범용 모듈 플랫폼 문서
 
-상태: **Architecture Freeze Candidate 1**  
-작성일: 2026-08-01  
-대상 브랜치: `csharp/standalone-engine`
+상태: **Architecture Baseline 1.0**  
+확정일: 2026-08-01  
+기준 커밋: `7d4fa1c8268ebe11a59875a9d4a1750586b4a31c`  
+대상 브랜치: `csharp/module-platform-baseline`
 
 이 디렉터리는 앞으로 ChartKit에 추가되는 모든 지표, 비교종목, 시장지수, 작도도구, 마우스 기능, 전략, 신호, 호가, 시장분석, 매매후보 및 외부 UI 기능의 공통 개발 기준이다.
 
@@ -22,6 +23,32 @@
 ```
 
 Renderer는 RSI, 전략, 호가, 피보나치, 비교종목 등의 업무 기능을 알지 않는다. Renderer는 제한된 범용 Primitive만 처리한다.
+
+## Baseline 1.0 확정 기록
+
+사용자 승인에 따라 `Architecture Freeze Candidate 1`을 `Architecture Baseline 1.0`으로 확정했다.
+
+확정 범위:
+
+```text
+Module Registry와 범용 On/Off
+ChartProfile과 상태 저장
+Contribution → SceneCompiler → RenderPlan → Renderer
+기능군 프로젝트 + 기능별 <Feature>Module.cs
+모듈 파일 상단 <chart-module> 연결 계약
+공용 Command/Property 메타데이터
+Context Menu/Quick Button/Property Inspector 자동 연결
+동적 PanelGraph·축·Interaction·HitTest
+비활성 모듈 계산 0
+Renderer/Module 참조 방향 제한
+CI 기반 모듈 파일 계약 검사
+```
+
+세부 승인 기록은 다음 문서에 보존한다.
+
+```text
+docs/chart-module-platform/architecture-baseline-1.0.md
+```
 
 ## 문서 구성
 
@@ -100,18 +127,9 @@ docs/chart-module-platform/templates/ChartModule.template.cs
 scripts/verify_chart_module_headers.ps1
 ```
 
-## 승인 및 변경 절차
+## 변경 절차
 
-현재 상태는 `Architecture Freeze Candidate 1`이다.
-
-사용자 승인 후 다음처럼 변경한다.
-
-```text
-Status: Architecture Freeze Candidate 1
-→ Status: Architecture Baseline 1.0
-```
-
-승인 이후 다음 변경은 근거 없이 허용하지 않는다.
+Baseline 1.0 이후 다음 변경은 근거 없이 허용하지 않는다.
 
 - Renderer가 개별 모듈을 직접 참조
 - 모듈이 `SKCanvas` 또는 `SKPaint`를 직접 사용
@@ -124,6 +142,18 @@ Status: Architecture Freeze Candidate 1
 - 플랫폼 연결 코드를 Calculator·Settings·MainForm 등에 분산
 
 공통 Primitive나 Capability가 부족한 경우 먼저 두 개 이상의 기능에서 재사용 가능한 범용 계약인지 검토한다.
+
+Baseline 변경이 필요한 경우 다음을 문서화한다.
+
+```text
+변경 사유
+대안 검토
+두 개 이상 기능에서의 재사용 근거
+성능 영향
+기존 Profile migration
+Renderer 변경 여부
+CI 보호 규칙 변경
+```
 
 ## 기능 구현 완료 정의
 
