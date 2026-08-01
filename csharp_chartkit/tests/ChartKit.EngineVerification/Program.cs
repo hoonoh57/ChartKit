@@ -19,6 +19,7 @@ try
     await KiwoomTickSourceOrderVerification.RunAsync();
     await TradingDayProbeVerification.RunAsync();
     RealtimeBuilderVerification.Run();
+    await KiwoomRealtimeReconnectVerification.RunAsync();
     Console.WriteLine("csharp_engine_verification=PASS");
     return 0;
 }
