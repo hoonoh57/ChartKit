@@ -72,7 +72,7 @@ public sealed class SystemChartModuleContext : IChartModuleContext
     public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
 }
 
-public sealed class ChartModuleHost
+public sealed partial class ChartModuleHost
 {
     private readonly object _gate = new();
     private readonly ChartModuleRegistry _registry;
