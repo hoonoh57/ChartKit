@@ -11,11 +11,19 @@ public enum TradingDayProbeState
     NoTradingDay = 2
 }
 
+public enum TradingDayProbeMethod
+{
+    None = 0,
+    TodayMinute = 1,
+    HistoricalDaily = 2
+}
+
 public readonly record struct TradingDayProbeSnapshot(
     DateTime TradingDate,
     TradingDayProbeState State,
-    string[] SymbolsWithTodayData,
-    string[] SymbolsWithoutTodayData,
+    TradingDayProbeMethod Method,
+    string[] SymbolsWithData,
+    string[] SymbolsWithoutData,
     int SuccessfulQueries,
     int FailedQueries,
     DateTimeOffset CheckedAtUtc,
@@ -25,6 +33,7 @@ public readonly record struct TradingDayProbeSnapshot(
         new(
             tradingDate.Date,
             TradingDayProbeState.Unknown,
+            TradingDayProbeMethod.None,
             [],
             [],
             0,
@@ -51,8 +60,26 @@ public sealed partial class KiwoomRestDataSource
     {
         ThrowIfDisposed();
         DateTime targetDate = tradingDate.Date;
-        var withTodayData = new List<string>(TradingDayBenchmarkSymbols.Length);
-        var withoutTodayData = new List<string>(TradingDayBenchmarkSymbols.Length);
+        DateTime today = DateTime.Today;
+        if (targetDate > today)
+        {
+            return new TradingDayProbeSnapshot(
+                targetDate,
+                TradingDayProbeState.Unknown,
+                TradingDayProbeMethod.None,
+                [],
+                [],
+                0,
+                0,
+                DateTimeOffset.UtcNow,
+                "Future trading dates are not probed.");
+        }
+
+        TradingDayProbeMethod method = targetDate == today
+            ? TradingDayProbeMethod.TodayMinute
+            : TradingDayProbeMethod.HistoricalDaily;
+        var withData = new List<string>(TradingDayBenchmarkSymbols.Length);
+        var withoutData = new List<string>(TradingDayBenchmarkSymbols.Length);
         var errors = new List<string>(TradingDayBenchmarkSymbols.Length);
         int successfulQueries = 0;
         int failedQueries = 0;
@@ -62,14 +89,19 @@ public sealed partial class KiwoomRestDataSource
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                DateTime? latestDate = await GetLatestMinuteTradingDateAsync(
-                    symbol,
-                    cancellationToken).ConfigureAwait(false);
+                DateTime? latestDate = method == TradingDayProbeMethod.TodayMinute
+                    ? await GetLatestMinuteTradingDateAsync(
+                        symbol,
+                        cancellationToken).ConfigureAwait(false)
+                    : await GetLatestDailyTradingDateAsync(
+                        symbol,
+                        targetDate,
+                        cancellationToken).ConfigureAwait(false);
                 successfulQueries++;
                 if (latestDate.HasValue && latestDate.Value.Date == targetDate)
-                    withTodayData.Add(symbol);
+                    withData.Add(symbol);
                 else
-                    withoutTodayData.Add(symbol);
+                    withoutData.Add(symbol);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -82,7 +114,7 @@ public sealed partial class KiwoomRestDataSource
             }
         }
 
-        TradingDayProbeState state = withTodayData.Count > 0
+        TradingDayProbeState state = withData.Count > 0
             ? TradingDayProbeState.TradingDay
             : successfulQueries == TradingDayBenchmarkSymbols.Length
                 ? TradingDayProbeState.NoTradingDay
@@ -91,8 +123,9 @@ public sealed partial class KiwoomRestDataSource
         return new TradingDayProbeSnapshot(
             targetDate,
             state,
-            withTodayData.ToArray(),
-            withoutTodayData.ToArray(),
+            method,
+            withData.ToArray(),
+            withoutData.ToArray(),
             successfulQueries,
             failedQueries,
             DateTimeOffset.UtcNow,
@@ -115,11 +148,45 @@ public sealed partial class KiwoomRestDataSource
             body,
             maximumRows: 1,
             cancellationToken).ConfigureAwait(false);
-        if (page.Rows.Count == 0) return null;
+        return ReadLatestTradingDate(
+            page.Rows,
+            CandleTimeframe.Minute(1),
+            daily: false);
+    }
 
-        CandleTimeframe timeframe = CandleTimeframe.Minute(1);
+    private async Task<DateTime?> GetLatestDailyTradingDateAsync(
+        string symbol,
+        DateTime targetDate,
+        CancellationToken cancellationToken)
+    {
+        string body = JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["stk_cd"] = symbol,
+            ["base_dt"] = targetDate.ToString(
+                "yyyyMMdd",
+                CultureInfo.InvariantCulture),
+            ["upd_stkpc_tp"] = _session.Options.AdjustPrice
+        });
+        PagedRows page = await FetchPagedAsync(
+            "/api/dostk/chart",
+            "ka10081",
+            body,
+            maximumRows: 1,
+            cancellationToken).ConfigureAwait(false);
+        return ReadLatestTradingDate(
+            page.Rows,
+            CandleTimeframe.Day,
+            daily: true);
+    }
+
+    private static DateTime? ReadLatestTradingDate(
+        List<System.Text.Json.JsonElement> rows,
+        CandleTimeframe timeframe,
+        bool daily)
+    {
+        if (rows.Count == 0) return null;
         List<Candle> candles = MarketDataNormalizer.NormalizeHistory(
-            ParseRows(page.Rows, timeframe, daily: false),
+            ParseRows(rows, timeframe, daily),
             timeframe,
             SourceArrayDirection.ReverseWhole);
         return candles.Count == 0 ? null : candles[^1].TradingDate;
