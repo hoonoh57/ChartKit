@@ -18,6 +18,8 @@ internal sealed class RealtimeCandleBuilder
         _tickCount = Math.Max(0, seedTickCount);
     }
 
+    public bool HasSeed => _current.HasValue;
+
     public bool TryApply(
         DateTime tradeTime,
         float price,
@@ -37,6 +39,19 @@ internal sealed class RealtimeCandleBuilder
         out MarketEventKind kind,
         out Candle candle)
     {
+        if (_current.HasValue)
+        {
+            Candle current = _current.Value;
+            if (tradeTime.Date < current.TradingDate ||
+                (tradeTime.Date == current.TradingDate &&
+                 tradeTime < current.CloseTime))
+            {
+                kind = default;
+                candle = default;
+                return false;
+            }
+        }
+
         bool append = !_current.HasValue ||
                       _tickCount >= _timeframe.Value ||
                       _current.Value.TradingDate != tradeTime.Date;
