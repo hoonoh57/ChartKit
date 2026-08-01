@@ -4,6 +4,7 @@
     <RootNamespace>ChartKit.CSharp.Composition</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\ChartKit.Modules.Abstractions\ChartKit.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\ChartKit.ModuleHost\ChartKit.ModuleHost.csproj" />
     <ProjectReference Include="..\ChartKit.Scene\ChartKit.Scene.csproj" />
   </ItemGroup>
