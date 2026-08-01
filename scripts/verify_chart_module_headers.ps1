@@ -1,4 +1,4 @@
-[CmdletBinding()]
+[CmdletBinding]
 param(
     [string]$SourceRoot = ".\csharp_chartkit\src"
 )
@@ -96,17 +96,33 @@ foreach ($file in $moduleFiles) {
             "must match file/class '$expectedClass'")
     }
 
+    $expectedRegistration = "registry.Register<$expectedClass>()"
+    if ($metadata.ContainsKey("Registration") -and
+        $metadata["Registration"] -ne $expectedRegistration) {
+        $errors.Add(
+            "${relativePath}: Registration must be exactly '$expectedRegistration'")
+    }
+
     if ($metadata.ContainsKey("Renderer-Path") -and
         $metadata["Renderer-Path"] -ne $expectedRendererPath) {
         $errors.Add(
             "${relativePath}: Renderer-Path must be exactly '$expectedRendererPath'")
     }
 
+    $escapedClass = [regex]::Escape($expectedClass)
     $classPattern =
-        "(?s)\bclass\s+" + [regex]::Escape($expectedClass) +
+        "(?s)\bclass\s+" + $escapedClass +
         "\b.*?:.*?\bIChartModule\b"
     if ($content -notmatch $classPattern) {
         $errors.Add("${relativePath}: $expectedClass must implement IChartModule")
+    }
+
+    $factoryInterfacePattern =
+        "\bIChartModuleFactory\s*<\s*" + $escapedClass + "\s*>"
+    if ($content -notmatch $factoryInterfacePattern) {
+        $errors.Add(
+            "${relativePath}: $expectedClass must implement " +
+            "IChartModuleFactory<$expectedClass>")
     }
 
     if ($content -notmatch
@@ -119,6 +135,23 @@ foreach ($file in $moduleFiles) {
         '\bChartModuleDefinition\s+ModuleDefinition\b') {
         $errors.Add(
             "${relativePath}: missing public ModuleDefinition exposure")
+    }
+
+    $createPattern =
+        "\bstatic\s+" + $escapedClass +
+        "\s+Create\s*\(\s*string\s+instanceId\s*\)"
+    if ($content -notmatch $createPattern) {
+        $errors.Add(
+            "${relativePath}: missing static $expectedClass Create(string instanceId)")
+    }
+
+    if ($content -notmatch '\bstring\s+InstanceId\b') {
+        $errors.Add("${relativePath}: missing public InstanceId exposure")
+    }
+
+    if ($content -notmatch
+        '\bvoid\s+ApplyProfile\s*\(\s*ChartModuleProfile\s+[A-Za-z_]') {
+        $errors.Add("${relativePath}: missing ApplyProfile(ChartModuleProfile ...)")
     }
 
     foreach ($pattern in $forbiddenPatterns) {
