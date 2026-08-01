@@ -150,6 +150,8 @@ internal static class ConsoleModes
                 if (!enabled.Succeeded || !enabled.Changed)
                     throw new InvalidOperationException("App module toggle failed.");
 
+                // Toggle already selects its owner. Inspect may therefore be an
+                // idempotent no-op; final owner identity is the actual contract.
                 ChartModulePlatformActionResult selected =
                     await controller.ExecuteCommandAsync(inspect);
                 if (!selected.Succeeded)
