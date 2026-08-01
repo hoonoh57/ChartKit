@@ -14,6 +14,7 @@ try
     CompositionProbeVerification.Run();
     await ProfilePersistenceVerification.RunAsync();
     UiMetadataVerification.Run();
+    SmaModuleParityVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     await RenderPlanRenderingVerification.RunAsync();

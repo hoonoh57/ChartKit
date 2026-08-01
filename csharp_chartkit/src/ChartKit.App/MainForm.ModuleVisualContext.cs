@@ -1,11 +1,13 @@
 using ChartKit.CSharp.Charting;
 using ChartKit.CSharp.Contracts;
+using ChartKit.CSharp.Modules.Abstractions;
 
 namespace ChartKit.CSharp.App;
 
 internal sealed partial class MainForm
 {
     private bool _moduleVisualContextHooked;
+    private bool _moduleVisualUpdatePending;
     private string? _moduleVisualSymbol;
     private string? _moduleVisualTimeframe;
     private int _moduleVisibleStartIndex = -1;
@@ -30,9 +32,10 @@ internal sealed partial class MainForm
         base.OnHandleDestroyed(e);
     }
 
-    private void OnModuleVisualContextFrame(object? sender, EventArgs e)
+    private async void OnModuleVisualContextFrame(object? sender, EventArgs e)
     {
-        if (!_modulePlatformReady ||
+        if (_moduleVisualUpdatePending ||
+            !_modulePlatformReady ||
             !TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
         {
             return;
@@ -53,19 +56,69 @@ internal sealed partial class MainForm
         if (viewportChanged)
             _moduleVisualViewportVersion++;
 
-        _moduleVisualSymbol = _selectedSymbol;
-        _moduleVisualTimeframe = timeframe;
-        _moduleVisibleStartIndex = window.StartIndex;
-        _moduleVisibleEndExclusive = window.EndExclusive;
-        _modulePlanDataVersion = snapshot.Version;
+        _moduleVisualUpdatePending = true;
+        try
+        {
+            if (dataChanged)
+            {
+                ChartPrimarySeriesSnapshot primary =
+                    CreatePrimarySeriesSnapshot(snapshot);
+                await ModulePlatform.UpdatePrimarySeriesAsync(
+                    primary,
+                    _moduleVisualViewportVersion,
+                    0,
+                    window.StartIndex,
+                    window.EndExclusive,
+                    _stop.Token);
+                _modulePlanDataVersion = snapshot.Version;
+            }
+            else
+            {
+                ModulePlatform.Recompose(
+                    snapshot.Version,
+                    _moduleVisualViewportVersion,
+                    0,
+                    window.StartIndex,
+                    window.EndExclusive);
+            }
 
-        ModulePlatform.Recompose(
-            snapshot.Version,
-            _moduleVisualViewportVersion,
-            0,
-            window.StartIndex,
-            window.EndExclusive);
-        _moduleRenderPlan = ModulePlatform.RenderPlan;
-        UpdateModuleStatus();
+            _moduleVisualSymbol = _selectedSymbol;
+            _moduleVisualTimeframe = timeframe;
+            _moduleVisibleStartIndex = window.StartIndex;
+            _moduleVisibleEndExclusive = window.EndExclusive;
+            _moduleRenderPlan = ModulePlatform.RenderPlan;
+            UpdateModuleStatus();
+            _chart.Invalidate();
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ShowFailure("모듈 데이터 갱신 실패", exception);
+        }
+        finally
+        {
+            _moduleVisualUpdatePending = false;
+        }
+    }
+
+    private static ChartPrimarySeriesSnapshot CreatePrimarySeriesSnapshot(
+        SymbolSnapshot snapshot)
+    {
+        var bars = new ChartPrimaryBar[snapshot.Candles.Length];
+        for (int index = 0; index < bars.Length; index++)
+        {
+            Candle candle = snapshot.Candles[index];
+            bars[index] = new ChartPrimaryBar(
+                candle.Sequence,
+                candle.Open,
+                candle.High,
+                candle.Low,
+                candle.Close,
+                candle.Volume,
+                candle.IsFinal);
+        }
+        return new ChartPrimarySeriesSnapshot(snapshot.Version, bars);
     }
 }

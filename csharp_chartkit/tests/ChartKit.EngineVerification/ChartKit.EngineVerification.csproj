@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\ChartKit.Scene\ChartKit.Scene.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.ModuleHost\ChartKit.ModuleHost.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Modules.Platform\ChartKit.Modules.Platform.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Modules.Indicators\ChartKit.Modules.Indicators.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Composition\ChartKit.Composition.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Persistence\ChartKit.Persistence.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.UiModel\ChartKit.UiModel.csproj" />
