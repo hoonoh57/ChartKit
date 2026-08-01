@@ -162,7 +162,13 @@ public interface IChartVisualProvider
 public readonly record struct ChartVisualContext(
     long DataVersion,
     long ViewportVersion,
-    long ThemeVersion);
+    long ThemeVersion,
+    int VisibleStartIndex = 0,
+    int VisibleEndExclusive = 0)
+{
+    public bool HasVisibleRange =>
+        VisibleStartIndex >= 0 && VisibleEndExclusive > VisibleStartIndex;
+}
 
 public interface IChartContributionWriter
 {
