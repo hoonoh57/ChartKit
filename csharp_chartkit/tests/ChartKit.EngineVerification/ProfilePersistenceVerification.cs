@@ -10,24 +10,15 @@ internal static class ProfilePersistenceVerification
     public static async Task RunAsync()
     {
         var codec = new ChartProfileCodec();
-        JsonObject callerLayout = new()
-        {
-            ["primaryPanel"] = "price.main"
-        };
-        JsonObject callerInteraction = new()
-        {
-            ["crosshair"] = true
-        };
-        JsonObject callerTheme = new()
-        {
-            ["name"] = "dark"
-        };
+        JsonObject callerLayout = new() { ["primaryPanel"] = "price.main" };
+        JsonObject callerInteraction = new() { ["crosshair"] = true };
+        JsonObject callerTheme = new() { ["name"] = "dark" };
         JsonObject probeParameters = new()
         {
             ["level"] = 100d,
             ["amplitude"] = 2d
         };
-        JsonObject unknownPersistentState = new()
+        JsonObject unknownState = new()
         {
             ["opaqueToken"] = "preserve-me"
         };
@@ -37,10 +28,8 @@ internal static class ProfilePersistenceVerification
             "probe-001",
             true,
             20,
-            "price.main",
-            probeParameters,
-            new JsonObject { ["stroke"] = "accent" },
-            new JsonObject());
+            parameters: probeParameters,
+            style: new JsonObject { ["stroke"] = "accent" });
         ChartModuleProfile unknown = NewModule(
             "external.unavailable",
             "external-001",
@@ -49,7 +38,7 @@ internal static class ProfilePersistenceVerification
             "external.panel",
             new JsonObject { ["vendorSetting"] = 7 },
             new JsonObject { ["vendorStyle"] = "opaque" },
-            unknownPersistentState);
+            unknownState);
 
         var profile = new ChartProfile(
             "5m",
@@ -59,56 +48,44 @@ internal static class ProfilePersistenceVerification
             [probe, unknown]);
 
         string first = codec.Serialize(profile);
-        string second = codec.Serialize(profile);
-        if (!StringComparer.Ordinal.Equals(first, second))
-        {
-            throw new InvalidOperationException(
-                "Chart profile serialization is not deterministic.");
-        }
+        Require(
+            StringComparer.Ordinal.Equals(first, codec.Serialize(profile)),
+            "Chart profile serialization is not deterministic.");
 
         ChartProfile restored = codec.Deserialize(first);
-        string roundTrip = codec.Serialize(restored);
-        if (!StringComparer.Ordinal.Equals(first, roundTrip))
-        {
-            throw new InvalidOperationException(
-                "Chart profile JSON did not round-trip deterministically.");
-        }
-        if (restored.SchemaVersion != ChartProfile.CurrentSchemaVersion ||
-            restored.Timeframe != "5m" ||
-            restored.Modules.Count != 2)
-        {
-            throw new InvalidOperationException(
-                "Chart profile round-trip changed root fields.");
-        }
+        Require(
+            StringComparer.Ordinal.Equals(first, codec.Serialize(restored)),
+            "Chart profile JSON did not round-trip deterministically.");
+        Require(
+            restored.SchemaVersion == ChartProfile.CurrentSchemaVersion &&
+            restored.Timeframe == "5m" &&
+            restored.Modules.Count == 2,
+            "Chart profile round-trip changed root fields.");
 
         ChartModuleProfile restoredUnknown = restored.Modules.Single(
             static module => module.ModuleId == "external.unavailable");
-        if (restoredUnknown.InstanceId != "external-001" ||
-            restoredUnknown.Placement != "external.panel" ||
-            restoredUnknown.PersistentState["opaqueToken"]?
-                .GetValue<string>() != "preserve-me")
-        {
-            throw new InvalidOperationException(
-                "Unavailable module profile was not preserved.");
-        }
+        string? opaqueToken = restoredUnknown.PersistentState["opaqueToken"]
+            ?.GetValue<string>();
+        Require(
+            restoredUnknown.InstanceId == "external-001" &&
+            restoredUnknown.Placement == "external.panel" &&
+            opaqueToken == "preserve-me",
+            "Unavailable module profile was not preserved.");
 
         callerLayout["primaryPanel"] = "caller-mutated";
         callerInteraction["crosshair"] = false;
         callerTheme["name"] = "caller-mutated";
         probeParameters["level"] = 999d;
-        unknownPersistentState["opaqueToken"] = "caller-mutated";
+        unknownState["opaqueToken"] = "caller-mutated";
 
         JsonObject exposedLayout = profile.Layout;
         exposedLayout["primaryPanel"] = "getter-mutated";
         IReadOnlyList<ChartModuleProfile> exposedModules = profile.Modules;
         exposedModules[0].Parameters["level"] = -1d;
         exposedModules[1].PersistentState["opaqueToken"] = "getter-mutated";
-
-        if (!StringComparer.Ordinal.Equals(first, codec.Serialize(profile)))
-        {
-            throw new InvalidOperationException(
-                "Chart profile defensive copy boundary was violated.");
-        }
+        Require(
+            StringComparer.Ordinal.Equals(first, codec.Serialize(profile)),
+            "Chart profile defensive copy boundary was violated.");
 
         VerifyLegacyMigration(codec);
         VerifyFutureVersionRejection(codec);
@@ -156,32 +133,28 @@ internal static class ProfilePersistenceVerification
         """;
 
         ChartProfile migrated = codec.Deserialize(legacyJson);
-        ChartModuleProfile migratedModule = migrated.Modules.Single();
-        if (migrated.SchemaVersion != ChartProfile.CurrentSchemaVersion ||
-            migrated.Timeframe != "15m" ||
-            migrated.Layout.Count != 0 ||
-            migrated.Interaction.Count != 0 ||
-            migrated.Theme["name"]?.GetValue<string>() != "legacy-dark" ||
-            migratedModule.ModuleId != "legacy.unavailable" ||
-            migratedModule.ModuleSchemaVersion != 1 ||
-            migratedModule.Placement != "price.main" ||
-            migratedModule.Parameters["period"]?.GetValue<int>() != 20)
-        {
-            throw new InvalidOperationException(
-                "Schema version 1 migration did not produce version 2 defaults.");
-        }
+        ChartModuleProfile module = migrated.Modules.Single();
+        Require(
+            migrated.SchemaVersion == ChartProfile.CurrentSchemaVersion &&
+            migrated.Timeframe == "15m" &&
+            migrated.Layout.Count == 0 &&
+            migrated.Interaction.Count == 0 &&
+            migrated.Theme["name"]?.GetValue<string>() == "legacy-dark" &&
+            module.ModuleId == "legacy.unavailable" &&
+            module.ModuleSchemaVersion == 1 &&
+            module.Placement == "price.main" &&
+            module.Parameters["period"]?.GetValue<int>() == 20,
+            "Schema version 1 migration did not produce version 2 defaults.");
 
         string migratedJson = codec.Serialize(migrated);
-        if (!migratedJson.Contains(
+        Require(
+            migratedJson.Contains(
                 "\"schemaVersion\": 2",
-                StringComparison.Ordinal) ||
-            !migratedJson.Contains(
+                StringComparison.Ordinal) &&
+            migratedJson.Contains(
                 "\"interaction\": {}",
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "Migrated profile was not serialized as current schema.");
-        }
+                StringComparison.Ordinal),
+            "Migrated profile was not serialized as current schema.");
     }
 
     private static void VerifyFutureVersionRejection(ChartProfileCodec codec)
@@ -193,73 +166,36 @@ internal static class ProfilePersistenceVerification
         }
         """;
 
-        bool rejected = false;
-        try
-        {
-            codec.Deserialize(futureJson);
-        }
-        catch (NotSupportedException)
-        {
-            rejected = true;
-        }
-
-        if (!rejected)
-        {
-            throw new InvalidOperationException(
-                "Future chart profile schema version was accepted.");
-        }
+        ExpectException<NotSupportedException>(
+            () => codec.Deserialize(futureJson),
+            "Future chart profile schema version was accepted.");
     }
 
     private static void VerifyValidation(ChartProfileCodec codec)
     {
-        bool duplicateRejected = false;
-        try
-        {
-            _ = new ChartProfile(
+        ExpectException<InvalidOperationException>(
+            () => _ = new ChartProfile(
                 "1m",
                 modules:
                 [
                     NewModule("module.one", "duplicate", false, 0),
                     NewModule("module.two", "duplicate", false, 0)
-                ]);
-        }
-        catch (InvalidOperationException)
-        {
-            duplicateRejected = true;
-        }
+                ]),
+            "Duplicate module instance id was accepted.");
 
-        bool blankIdRejected = false;
-        try
-        {
-            _ = new ChartProfile(
+        ExpectException<ArgumentException>(
+            () => _ = new ChartProfile(
                 "1m",
                 modules:
                 [
                     NewModule(" ", "blank-id", false, 0)
-                ]);
-        }
-        catch (ArgumentException)
-        {
-            blankIdRejected = true;
-        }
+                ]),
+            "Blank module id was accepted.");
 
-        bool invalidModulesRejected = false;
-        try
-        {
-            codec.Deserialize(
-                "{\"schemaVersion\":2,\"timeframe\":\"1m\",\"modules\":{}}");
-        }
-        catch (InvalidDataException)
-        {
-            invalidModulesRejected = true;
-        }
-
-        if (!duplicateRejected || !blankIdRejected ||
-            !invalidModulesRejected)
-        {
-            throw new InvalidOperationException(
-                "Chart profile validation accepted invalid data.");
-        }
+        ExpectException<InvalidDataException>(
+            () => codec.Deserialize(
+                "{\"schemaVersion\":2,\"timeframe\":\"1m\",\"modules\":{}}"),
+            "Non-array modules property was accepted.");
     }
 
     private static async Task VerifyAtomicStoreAsync(
@@ -278,13 +214,11 @@ internal static class ProfilePersistenceVerification
             await store.SaveAsync(path, profile).ConfigureAwait(false);
             ChartProfile firstLoad = await store.LoadAsync(path)
                 .ConfigureAwait(false);
-            if (!StringComparer.Ordinal.Equals(
+            Require(
+                StringComparer.Ordinal.Equals(
                     codec.Serialize(profile),
-                    codec.Serialize(firstLoad)))
-            {
-                throw new InvalidOperationException(
-                    "Initial atomic profile save did not round-trip.");
-            }
+                    codec.Serialize(firstLoad)),
+                "Initial atomic profile save did not round-trip.");
 
             var updated = new ChartProfile(
                 "30m",
@@ -295,31 +229,23 @@ internal static class ProfilePersistenceVerification
             await store.SaveAsync(path, updated).ConfigureAwait(false);
             ChartProfile secondLoad = await store.LoadAsync(path)
                 .ConfigureAwait(false);
-            if (secondLoad.Timeframe != "30m")
-            {
-                throw new InvalidOperationException(
-                    "Atomic profile overwrite did not replace the target.");
-            }
+            Require(
+                secondLoad.Timeframe == "30m",
+                "Atomic profile overwrite did not replace the target.");
 
             byte[] bytes = await File.ReadAllBytesAsync(path)
                 .ConfigureAwait(false);
-            if (bytes.Length >= 3 &&
+            bool hasBom = bytes.Length >= 3 &&
                 bytes[0] == 0xEF &&
                 bytes[1] == 0xBB &&
-                bytes[2] == 0xBF)
-            {
-                throw new InvalidOperationException(
-                    "Profile store wrote an unexpected UTF-8 BOM.");
-            }
-
-            if (Directory.EnumerateFiles(
+                bytes[2] == 0xBF;
+            Require(!hasBom, "Profile store wrote an unexpected UTF-8 BOM.");
+            Require(
+                !Directory.EnumerateFiles(
                     directory,
                     "*.tmp",
-                    SearchOption.TopDirectoryOnly).Any())
-            {
-                throw new InvalidOperationException(
-                    "Atomic profile store left a temporary file behind.");
-            }
+                    SearchOption.TopDirectoryOnly).Any(),
+                "Atomic profile store left a temporary file behind.");
         }
         finally
         {
@@ -368,22 +294,17 @@ internal static class ProfilePersistenceVerification
             .GetReferencedAssemblies()
             .Select(static name => name.Name ?? string.Empty)
             .ToArray();
-
-        if (!references.Contains(
+        Require(
+            references.Contains(
                 "ChartKit.Modules.Abstractions",
-                StringComparer.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "ChartKit.Persistence lost its module profile contract reference.");
-        }
+                StringComparer.Ordinal),
+            "ChartKit.Persistence lost its module profile contract reference.");
 
         foreach (string name in forbidden)
         {
-            if (references.Contains(name, StringComparer.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"ChartKit.Persistence has forbidden reference: {name}");
-            }
+            Require(
+                !references.Contains(name, StringComparer.Ordinal),
+                $"ChartKit.Persistence has forbidden reference: {name}");
         }
     }
 
@@ -392,11 +313,32 @@ internal static class ProfilePersistenceVerification
         string? configuration = assembly
             .GetCustomAttribute<AssemblyConfigurationAttribute>()?
             .Configuration;
-        if (!string.Equals(configuration, "Release", StringComparison.Ordinal))
+        Require(
+            string.Equals(configuration, "Release", StringComparison.Ordinal),
+            $"{assembly.GetName().Name} was loaded from configuration " +
+            $"'{configuration ?? "<missing>"}' instead of Release.");
+    }
+
+    private static void ExpectException<TException>(
+        Action action,
+        string failureMessage)
+        where TException : Exception
+    {
+        try
         {
-            throw new InvalidOperationException(
-                $"{assembly.GetName().Name} was loaded from configuration " +
-                $"'{configuration ?? "<missing>"}' instead of Release.");
+            action();
         }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(failureMessage);
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition)
+            throw new InvalidOperationException(message);
     }
 }
