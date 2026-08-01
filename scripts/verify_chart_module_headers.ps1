@@ -38,22 +38,30 @@ if (-not (Test-Path -LiteralPath $SourceRoot)) {
     throw "Source root does not exist: $SourceRoot"
 }
 
-$moduleRoots = Get-ChildItem -LiteralPath $SourceRoot -Directory |
-    Where-Object {
-        $_.Name -eq "ChartKit.Modules" -or
-        $_.Name -like "ChartKit.Modules.*"
-    }
+$moduleRoots = @(
+    Get-ChildItem -LiteralPath $SourceRoot -Directory |
+        Where-Object {
+            $_.Name -eq "ChartKit.Modules" -or
+            $_.Name -like "ChartKit.Modules.*"
+        }
+)
 
-if (-not $moduleRoots) {
+if ($moduleRoots.Count -eq 0) {
     Write-Host "chart_module_header_contract=PASS module_files=0"
     exit 0
 }
 
-$moduleFiles = foreach ($root in $moduleRoots) {
-    Get-ChildItem -LiteralPath $root.FullName -Recurse -File -Filter "*Module.cs"
-}
+$moduleFiles = @(
+    foreach ($root in $moduleRoots) {
+        Get-ChildItem `
+            -LiteralPath $root.FullName `
+            -Recurse `
+            -File `
+            -Filter "*Module.cs"
+    }
+)
 
-if (-not $moduleFiles) {
+if ($moduleFiles.Count -eq 0) {
     Write-Host "chart_module_header_contract=PASS module_files=0"
     exit 0
 }
@@ -61,8 +69,8 @@ if (-not $moduleFiles) {
 $errors = [System.Collections.Generic.List[string]]::new()
 
 foreach ($file in $moduleFiles) {
-    $allLines = Get-Content -LiteralPath $file.FullName
-    $headerLines = $allLines | Select-Object -First 80
+    $allLines = @(Get-Content -LiteralPath $file.FullName)
+    $headerLines = @($allLines | Select-Object -First 80)
     $header = $headerLines -join "`n"
     $content = $allLines -join "`n"
     $relativePath = Resolve-Path -LiteralPath $file.FullName -Relative

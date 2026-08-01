@@ -144,6 +144,20 @@ scripts/verify_chart_module_headers.ps1
 
 신규 기능 파일의 템플릿과 CI 검사는 이 Registry·Host 계약과 동일해야 한다.
 
+### 6. `module-composition-probe-standard.md` — P1-C 구현 표준
+
+다음을 첫 실제 수직 경로로 고정한다.
+
+- `ChartModuleHost`에서 활성 Contribution 수집
+- `ChartCompositionService`의 Host 계약 → Scene 계약 변환
+- `SceneCompiler`를 통한 immutable `ChartRenderPlan` 생성
+- 첫 표준 기능 파일 `PlatformProbeModule.cs`
+- 비활성 모듈 RenderPlan primitive 0
+- Profile panel·z-index·parameter 변경 반영
+- 동일 입력의 결정적 RenderPlan
+- `Modules.Platform`와 `Composition` 참조 경계
+- Renderer와 App UI 미변경
+
 ## 변경 절차
 
 Baseline 1.0 이후 다음 변경은 근거 없이 허용하지 않는다.
