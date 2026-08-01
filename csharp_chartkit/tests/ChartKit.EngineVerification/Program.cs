@@ -15,6 +15,7 @@ try
     await ProfilePersistenceVerification.RunAsync();
     UiMetadataVerification.Run();
     SmaModuleParityVerification.Run();
+    RsiModuleParityVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     await RenderPlanRenderingVerification.RunAsync();

@@ -123,7 +123,8 @@ internal static class ConsoleModes
             Path.GetTempPath(),
             "chartkit-app-module-self-test-" + Guid.NewGuid().ToString("N"));
         string profilePath = Path.Combine(directory, "chart-profile.json");
-        ChartPrimarySeriesSnapshot primary = CreateSmaPrimarySeries();
+        ChartPrimarySeriesSnapshot smaPrimary = CreateSmaPrimarySeries();
+        ChartPrimarySeriesSnapshot rsiPrimary = CreateRsiPrimarySeries();
 
         try
         {
@@ -143,15 +144,20 @@ internal static class ConsoleModes
                     static item =>
                         item.Kind == ChartUiCommandKind.ModuleToggle &&
                         item.Owner.ModuleId == SmaModule.Definition.ModuleId);
+                ChartUiCommandItem rsiToggle = initial.ContextMenuItems.Single(
+                    static item =>
+                        item.Kind == ChartUiCommandKind.ModuleToggle &&
+                        item.Owner.ModuleId == RsiModule.Definition.ModuleId);
 
-                if (initial.ContextMenuItems.Count < 4 ||
+                if (initial.ContextMenuItems.Count < 6 ||
                     !initial.ContextMenuItems.Contains(toggle) ||
-                    !initial.ContextMenuItems.Contains(smaToggle))
+                    !initial.ContextMenuItems.Contains(smaToggle) ||
+                    !initial.ContextMenuItems.Contains(rsiToggle))
                 {
                     throw new InvalidOperationException(
                         "App module context-menu projection failed.");
                 }
-                if (initial.QuickToolbarItems.Count < 4 ||
+                if (initial.QuickToolbarItems.Count < 6 ||
                     !initial.QuickToolbarItems.Contains(inspect))
                 {
                     throw new InvalidOperationException(
@@ -211,11 +217,11 @@ internal static class ConsoleModes
                     throw new InvalidOperationException("App SMA toggle failed.");
 
                 await controller.UpdatePrimarySeriesAsync(
-                    primary,
+                    smaPrimary,
                     viewportVersion: 1,
                     themeVersion: 0,
                     visibleStartIndex: 0,
-                    visibleEndExclusive: primary.Bars.Count);
+                    visibleEndExclusive: smaPrimary.Bars.Count);
                 RenderPrimitivePlan smaPlan = controller.RenderPlan.Primitives.Single(
                     static item =>
                         item.Identity.ModuleId == SmaModule.Definition.ModuleId);
@@ -238,6 +244,89 @@ internal static class ConsoleModes
                     static item =>
                         item.Identity.ModuleId == SmaModule.Definition.ModuleId);
                 AssertLastSma(smaPlan, 137d, "period 5");
+
+                ChartModulePlatformActionResult rsiEnabled =
+                    await controller.ExecuteCommandAsync(rsiToggle);
+                if (!rsiEnabled.Succeeded || !rsiEnabled.Changed)
+                    throw new InvalidOperationException("App RSI toggle failed.");
+
+                await controller.UpdatePrimarySeriesAsync(
+                    rsiPrimary,
+                    viewportVersion: 2,
+                    themeVersion: 0,
+                    visibleStartIndex: 0,
+                    visibleEndExclusive: rsiPrimary.Bars.Count);
+                AssertRsiPlan(
+                    controller.RenderPlan,
+                    rsiPrimary,
+                    14,
+                    9,
+                    70d,
+                    30d,
+                    "default");
+
+                controller.Select(rsiToggle.Owner);
+                ChartUiCatalogSnapshot rsiCatalog = controller.BuildUiCatalog();
+                string[] expectedRsiProperties =
+                [
+                    "lower",
+                    "period",
+                    "rsi.lower.stroke",
+                    "rsi.signal.stroke",
+                    "rsi.upper.stroke",
+                    "rsi.value.stroke",
+                    "signalPeriod",
+                    "upper"
+                ];
+                if (!rsiCatalog.InspectorProperties
+                        .Select(static item => item.Descriptor.PropertyId)
+                        .OrderBy(static item => item, StringComparer.Ordinal)
+                        .SequenceEqual(expectedRsiProperties))
+                {
+                    throw new InvalidOperationException(
+                        "App RSI property projection failed.");
+                }
+
+                await RequirePropertyChangeAsync(
+                    controller,
+                    rsiToggle.Owner.InstanceId,
+                    "period",
+                    JsonValue.Create(5),
+                    ChartChangeImpact.RecalculateModule);
+                await RequirePropertyChangeAsync(
+                    controller,
+                    rsiToggle.Owner.InstanceId,
+                    "signalPeriod",
+                    JsonValue.Create(3),
+                    ChartChangeImpact.RecalculateModule);
+                await RequirePropertyChangeAsync(
+                    controller,
+                    rsiToggle.Owner.InstanceId,
+                    "upper",
+                    JsonValue.Create(80d),
+                    ChartChangeImpact.RebuildVisuals);
+                await RequirePropertyChangeAsync(
+                    controller,
+                    rsiToggle.Owner.InstanceId,
+                    "lower",
+                    JsonValue.Create(20d),
+                    ChartChangeImpact.RebuildVisuals);
+                await RequirePropertyChangeAsync(
+                    controller,
+                    rsiToggle.Owner.InstanceId,
+                    RsiModule.RsiObjectId + ".stroke",
+                    JsonValue.Create("#123456"),
+                    ChartChangeImpact.RedrawOnly);
+
+                AssertRsiPlan(
+                    controller.RenderPlan,
+                    rsiPrimary,
+                    5,
+                    3,
+                    80d,
+                    20d,
+                    "changed",
+                    expectedRsiStroke: "#123456");
 
                 await controller.UpdateShellProfileAsync(
                     timeframe.ToString(),
@@ -272,9 +361,18 @@ internal static class ConsoleModes
                         static item =>
                             item.Kind == ChartUiCommandKind.ModuleToggle &&
                             item.Owner.ModuleId == SmaModule.Definition.ModuleId);
-                if (!restoredToggle.IsChecked || !restoredSmaToggle.IsChecked)
+                ChartUiCommandItem restoredRsiToggle =
+                    restoredCatalog.ContextMenuItems.Single(
+                        static item =>
+                            item.Kind == ChartUiCommandKind.ModuleToggle &&
+                            item.Owner.ModuleId == RsiModule.Definition.ModuleId);
+                if (!restoredToggle.IsChecked ||
+                    !restoredSmaToggle.IsChecked ||
+                    !restoredRsiToggle.IsChecked)
+                {
                     throw new InvalidOperationException(
                         "App module enabled state was not restored.");
+                }
 
                 restored.Select(restoredToggle.Owner);
                 ChartUiPropertyItem restoredLevel = restored
@@ -302,17 +400,20 @@ internal static class ConsoleModes
                         "App SMA period was not restored.");
 
                 await restored.UpdatePrimarySeriesAsync(
-                    primary,
-                    viewportVersion: 1,
+                    rsiPrimary,
+                    viewportVersion: 2,
                     themeVersion: 0,
                     visibleStartIndex: 0,
-                    visibleEndExclusive: primary.Bars.Count);
-                RenderPrimitivePlan restoredSma =
-                    restored.RenderPlan.Primitives.Single(
-                        static item =>
-                            item.Identity.ModuleId ==
-                                SmaModule.Definition.ModuleId);
-                AssertLastSma(restoredSma, 137d, "restored period 5");
+                    visibleEndExclusive: rsiPrimary.Bars.Count);
+                AssertRsiPlan(
+                    restored.RenderPlan,
+                    rsiPrimary,
+                    5,
+                    3,
+                    80d,
+                    20d,
+                    "restored",
+                    expectedRsiStroke: "#123456");
             }
 
             Console.WriteLine("csharp_app_module_profile_load=PASS");
@@ -324,11 +425,35 @@ internal static class ConsoleModes
             Console.WriteLine("csharp_app_sma_module_data=PASS");
             Console.WriteLine("csharp_app_sma_module_period=PASS");
             Console.WriteLine("csharp_app_sma_module_roundtrip=PASS");
+            Console.WriteLine("csharp_app_rsi_module_data=PASS");
+            Console.WriteLine("csharp_app_rsi_module_parameters=PASS");
+            Console.WriteLine("csharp_app_rsi_module_style=PASS");
+            Console.WriteLine("csharp_app_rsi_module_roundtrip=PASS");
         }
         finally
         {
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static async Task RequirePropertyChangeAsync(
+        ChartModulePlatformController controller,
+        string instanceId,
+        string propertyId,
+        JsonNode? value,
+        ChartChangeImpact expectedImpact)
+    {
+        ChartPropertyChangeResult result = await controller.ChangePropertyAsync(
+            instanceId,
+            propertyId,
+            value);
+        if (!result.Succeeded ||
+            !result.Changed ||
+            result.ChangeImpact != expectedImpact)
+        {
+            throw new InvalidOperationException(
+                $"App property mutation failed: {propertyId}.");
         }
     }
 
@@ -350,6 +475,27 @@ internal static class ConsoleModes
         return new ChartPrimarySeriesSnapshot(100, bars);
     }
 
+    private static ChartPrimarySeriesSnapshot CreateRsiPrimarySeries()
+    {
+        var bars = new ChartPrimaryBar[80];
+        double previous = 100d;
+        for (int index = 0; index < bars.Length; index++)
+        {
+            double close = 100d + index * 0.15d +
+                           Math.Sin(index / 3d) * 6d;
+            bars[index] = new ChartPrimaryBar(
+                index,
+                previous,
+                Math.Max(previous, close) + 1d,
+                Math.Min(previous, close) - 1d,
+                close,
+                2_000L + index * 10L,
+                true);
+            previous = close;
+        }
+        return new ChartPrimarySeriesSnapshot(200, bars);
+    }
+
     private static void AssertLastSma(
         RenderPrimitivePlan plan,
         double expected,
@@ -360,6 +506,91 @@ internal static class ConsoleModes
         {
             throw new InvalidOperationException(
                 $"App SMA {context} mismatch: expected={expected}, actual={actual}.");
+        }
+    }
+
+    private static void AssertRsiPlan(
+        ChartRenderPlan plan,
+        ChartPrimarySeriesSnapshot primary,
+        int period,
+        int signalPeriod,
+        double upper,
+        double lower,
+        string context,
+        string? expectedRsiStroke = null)
+    {
+        Dictionary<string, RenderPrimitivePlan> rsi = plan.Primitives
+            .Where(static item =>
+                item.Identity.ModuleId == RsiModule.Definition.ModuleId)
+            .ToDictionary(
+                static item => item.Identity.ObjectId,
+                StringComparer.Ordinal);
+        if (rsi.Count != 4)
+            throw new InvalidOperationException(
+                $"App RSI {context} primitive count mismatch.");
+
+        IReadOnlyList<Candle> candles = ToCandles(primary);
+        IndicatorPoint expected = new RsiIndicator(period, signalPeriod)
+            .Calculate(candles)[^1];
+        FixtureEqual(
+            expected.Value0,
+            (float)rsi[RsiModule.RsiObjectId].Points[^1].Y,
+            $"App RSI {context} value");
+        FixtureEqual(
+            expected.Value1,
+            (float)rsi[RsiModule.SignalObjectId].Points[^1].Y,
+            $"App RSI {context} signal");
+        FixtureEqual(
+            (float)upper,
+            (float)rsi[RsiModule.UpperObjectId].Points[^1].Y,
+            $"App RSI {context} upper");
+        FixtureEqual(
+            (float)lower,
+            (float)rsi[RsiModule.LowerObjectId].Points[^1].Y,
+            $"App RSI {context} lower");
+
+        if (expectedRsiStroke is not null &&
+            rsi[RsiModule.RsiObjectId].Style.Stroke != expectedRsiStroke)
+        {
+            throw new InvalidOperationException(
+                $"App RSI {context} style mismatch.");
+        }
+    }
+
+    private static IReadOnlyList<Candle> ToCandles(
+        ChartPrimarySeriesSnapshot primary)
+    {
+        var candles = new Candle[primary.Bars.Count];
+        DateTime start = new(2026, 8, 1, 9, 0, 0);
+        for (int index = 0; index < candles.Length; index++)
+        {
+            ChartPrimaryBar bar = primary.Bars[index];
+            candles[index] = new Candle(
+                start.AddMinutes(index),
+                start.AddMinutes(index + 1),
+                (float)bar.Open,
+                (float)bar.High,
+                (float)bar.Low,
+                (float)bar.Close,
+                bar.Volume,
+                bar.IsFinal,
+                bar.Sequence);
+        }
+        return candles;
+    }
+
+    private static void FixtureEqual(
+        float expected,
+        float actual,
+        string context,
+        float tolerance = 0.0001f)
+    {
+        if (float.IsNaN(expected) && float.IsNaN(actual)) return;
+        float scale = Math.Max(1f, Math.Max(Math.Abs(expected), Math.Abs(actual)));
+        if (Math.Abs(expected - actual) > tolerance * scale)
+        {
+            throw new InvalidOperationException(
+                $"{context}: expected={expected}, actual={actual}.");
         }
     }
 }
