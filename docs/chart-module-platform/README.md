@@ -173,6 +173,21 @@ scripts/verify_chart_module_headers.ps1
 - UTF-8 BOM 없는 동일 디렉터리 임시 파일 교체
 - Persistence의 Renderer·App·ModuleHost 참조 금지
 
+### 8. `ui-metadata-property-standard.md` — P1-E 구현 표준
+
+다음을 공용 UI 메타데이터와 Property 변경 계약으로 고정한다.
+
+- CommandDescriptor·PropertyDescriptor의 Host 소유권 부여
+- 같은 메타데이터에서 Context Menu·Quick Toolbar·Inspector 투영
+- 모든 모듈 인스턴스의 범용 On/Off 명령 자동 생성
+- ChartObjectIdentity 기반 Selection
+- Property ValueKind·Storage·범위·허용값 선언
+- `ChangeChartPropertyCommand` 단일 변경 경로
+- 동일 값 no-op
+- 선언된 `ChartChangeImpact`의 정확한 반환
+- Profile 변경이 ModuleHost와 RenderPlan까지 전달
+- UiModel의 WinForms·Renderer·DataSources 참조 금지
+
 ## 변경 절차
 
 Baseline 1.0 이후 다음 변경은 근거 없이 허용하지 않는다.
