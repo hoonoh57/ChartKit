@@ -47,6 +47,7 @@ internal sealed class ChartModulePlatformController : IDisposable
         _registry.Register<PlatformProbeModule>();
         _registry.Register<SmaModule>();
         _registry.Register<RsiModule>();
+        _registry.Register<MacdModule>();
         _host = new ChartModuleHost(_registry);
         _composition = new ChartCompositionService(_host);
         _uiCatalog = new ChartModuleUiCatalog(_registry, _host, _selection);
