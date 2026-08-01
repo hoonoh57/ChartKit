@@ -6,7 +6,8 @@ namespace ChartKit.CSharp.DataSources;
 public sealed partial class KiwoomRestDataSource :
     IMarketDataSource,
     IInstrumentMetadataSource,
-    IRealtimeDiagnosticsSource
+    IRealtimeDiagnosticsSource,
+    ITradingDayProbeSource
 {
     private readonly KiwoomApiSession _session;
     private readonly bool _ownsSession;
