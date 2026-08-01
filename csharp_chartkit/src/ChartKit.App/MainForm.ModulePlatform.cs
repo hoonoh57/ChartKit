@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ChartKit.CSharp.Contracts;
+using ChartKit.CSharp.ModuleHost;
 using ChartKit.CSharp.Modules.Abstractions;
 using ChartKit.CSharp.Persistence;
 using ChartKit.CSharp.Scene;
@@ -11,24 +13,89 @@ namespace ChartKit.CSharp.App;
 
 internal sealed partial class MainForm
 {
-    private readonly ChartModulePlatformController _modulePlatform;
     private readonly System.Windows.Forms.Timer _profileSaveTimer = new();
     private readonly TabControl _rightTabs = new();
     private readonly TabPage _infoTab = new("종목정보");
     private readonly TabPage _moduleTab = new("모듈");
     private readonly Panel _moduleInspectorHost = new();
     private readonly TableLayoutPanel _moduleInspectorTable = new();
+    private readonly ToolStripStatusLabel _moduleStatusLabel = new();
     private readonly List<ToolStripItem> _moduleQuickItems = [];
     private readonly List<ToolStripItem> _moduleContextItems = [];
+    private ChartModulePlatformController? _modulePlatform;
     private ChartRenderPlan _moduleRenderPlan =
         new(Array.Empty<RenderPrimitivePlan>());
+    private long _modulePlanDataVersion = -1;
     private bool _modulePlatformReady;
     private bool _applyingChartProfile;
     private bool _savingChartProfile;
 
+    private ChartModulePlatformController ModulePlatform =>
+        _modulePlatform ?? throw new InvalidOperationException(
+            "Chart module platform controller is unavailable.");
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        _modulePlatform = new ChartModulePlatformController(_options.ProfilePath);
+        InitializeModuleInspectorShell();
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        BeginInvoke(async () => await InitializeModulePlatformAfterInitialLoadAsync());
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        FlushModuleProfileOnClose();
+        base.OnFormClosing(e);
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        base.OnFormClosed(e);
+        _profileSaveTimer.Dispose();
+        _modulePlatform?.Dispose();
+    }
+
+    private async Task InitializeModulePlatformAfterInitialLoadAsync()
+    {
+        try
+        {
+            await _reloadGate.WaitAsync(_stop.Token);
+            _reloadGate.Release();
+
+            CandleTimeframe profileTimeframe =
+                await InitializeModulePlatformAsync();
+            if (profileTimeframe != _workspace.Timeframe)
+            {
+                await ReloadAsync(profileTimeframe);
+            }
+            else if (TryGetSelectedSnapshot(out Engine.SymbolSnapshot? snapshot))
+            {
+                _viewport.SetVisibleBars(
+                    _workspace.RequestedVisibleBars,
+                    snapshot.Candles.Length,
+                    followLatest: true);
+            }
+
+            SynchronizeShellChecks();
+            _chart.Invalidate();
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ShowFailure("Chart Profile 시작 실패", exception);
+        }
+    }
+
     private async Task<CandleTimeframe> InitializeModulePlatformAsync()
     {
-        ChartProfile profile = await _modulePlatform.InitializeAsync(
+        ChartProfile profile = await ModulePlatform.InitializeAsync(
             _workspace.Timeframe.ToString(),
             _stop.Token);
 
@@ -43,15 +110,16 @@ internal sealed partial class MainForm
         }
 
         _modulePlatformReady = true;
-        _moduleRenderPlan = _modulePlatform.RenderPlan;
+        _moduleRenderPlan = ModulePlatform.RenderPlan;
 
-        ChartUiCatalogSnapshot catalog = _modulePlatform.BuildUiCatalog();
+        ChartUiCatalogSnapshot catalog = ModulePlatform.BuildUiCatalog();
         ChartUiCommandItem? firstModule = catalog.ContextMenuItems.FirstOrDefault(
             static item => item.Kind == ChartUiCommandKind.ModuleToggle);
         if (firstModule is not null)
-            _modulePlatform.Select(firstModule.Owner);
+            ModulePlatform.Select(firstModule.Owner);
 
         RefreshModuleUi();
+        UpdateModuleStatus();
         return AppOptions.TryParseTimeframe(
             profile.Timeframe,
             out CandleTimeframe timeframe)
@@ -61,6 +129,8 @@ internal sealed partial class MainForm
 
     private void InitializeModuleInspectorShell()
     {
+        _workspaceSplit.Panel2.Controls.Remove(_infoTable);
+
         _rightTabs.Dock = DockStyle.Fill;
         _rightTabs.Alignment = TabAlignment.Top;
 
@@ -87,6 +157,11 @@ internal sealed partial class MainForm
         _rightTabs.TabPages.Add(_moduleTab);
         _workspaceSplit.Panel2.Controls.Add(_rightTabs);
 
+        _moduleStatusLabel.BorderSides = ToolStripStatusLabelBorderSides.Left;
+        _moduleStatusLabel.Text = "modules loading";
+        _moduleStatusLabel.AutoSize = true;
+        _statusStrip.Items.Add(_moduleStatusLabel);
+
         _profileSaveTimer.Interval = 350;
         _profileSaveTimer.Tick += async (_, _) =>
         {
@@ -95,16 +170,26 @@ internal sealed partial class MainForm
         };
 
         _chartContextMenu.Opening += (_, _) => RefreshModuleContextMenu();
+        _chartContextMenu.ItemClicked += (_, _) => ScheduleModuleProfileSave();
+        _toolsButton.DropDownItemClicked += (_, _) => ScheduleModuleProfileSave();
+        _dateButton.Click += (_, _) => ScheduleModuleProfileSave();
+        _infoButton.Click += (_, _) => ScheduleModuleProfileSave();
+        _timeframeSelector.SelectedIndexChanged +=
+            (_, _) => ScheduleModuleProfileSave();
+        _visibleBarsSelector.SelectedIndexChanged +=
+            (_, _) => ScheduleModuleProfileSave();
+        _frameTimer.Tick += (_, _) => RefreshModulePlanForCurrentSnapshot();
     }
 
     private void RefreshModuleUi()
     {
         if (!_modulePlatformReady) return;
 
-        ChartUiCatalogSnapshot catalog = _modulePlatform.BuildUiCatalog();
+        ChartUiCatalogSnapshot catalog = ModulePlatform.BuildUiCatalog();
         RefreshModuleQuickToolbar(catalog);
         RefreshModuleContextMenu(catalog);
         RefreshModuleInspector(catalog);
+        UpdateModuleStatus();
     }
 
     private void RefreshModuleQuickToolbar(ChartUiCatalogSnapshot catalog)
@@ -137,7 +222,7 @@ internal sealed partial class MainForm
     private void RefreshModuleContextMenu()
     {
         if (!_modulePlatformReady) return;
-        RefreshModuleContextMenu(_modulePlatform.BuildUiCatalog());
+        RefreshModuleContextMenu(ModulePlatform.BuildUiCatalog());
     }
 
     private void RefreshModuleContextMenu(ChartUiCatalogSnapshot catalog)
@@ -179,7 +264,7 @@ internal sealed partial class MainForm
         try
         {
             ChartModulePlatformActionResult result =
-                await _modulePlatform.ExecuteCommandAsync(
+                await ModulePlatform.ExecuteCommandAsync(
                     command,
                     _stop.Token);
             if (!result.Succeeded)
@@ -189,7 +274,7 @@ internal sealed partial class MainForm
                 return;
             }
 
-            _moduleRenderPlan = _modulePlatform.RenderPlan;
+            _moduleRenderPlan = ModulePlatform.RenderPlan;
             _rightTabs.SelectedTab = _moduleTab;
             RefreshModuleUi();
             _chart.Invalidate();
@@ -211,9 +296,12 @@ internal sealed partial class MainForm
         _moduleInspectorTable.SuspendLayout();
         try
         {
-            foreach (Control control in _moduleInspectorTable.Controls)
+            while (_moduleInspectorTable.Controls.Count > 0)
+            {
+                Control control = _moduleInspectorTable.Controls[0];
+                _moduleInspectorTable.Controls.RemoveAt(0);
                 control.Dispose();
-            _moduleInspectorTable.Controls.Clear();
+            }
             _moduleInspectorTable.RowStyles.Clear();
             _moduleInspectorTable.RowCount = 0;
 
@@ -419,7 +507,7 @@ internal sealed partial class MainForm
         try
         {
             ChartPropertyChangeResult result =
-                await _modulePlatform.ChangePropertyAsync(
+                await ModulePlatform.ChangePropertyAsync(
                     property.Owner.InstanceId,
                     property.Descriptor.PropertyId,
                     value,
@@ -432,7 +520,7 @@ internal sealed partial class MainForm
                 return;
             }
 
-            _moduleRenderPlan = _modulePlatform.RenderPlan;
+            _moduleRenderPlan = ModulePlatform.RenderPlan;
             RefreshModuleUi();
             _chart.Invalidate();
             _statusLabel.Text = result.Changed
@@ -498,7 +586,7 @@ internal sealed partial class MainForm
         _savingChartProfile = true;
         try
         {
-            await _modulePlatform.UpdateShellProfileAsync(
+            await ModulePlatform.UpdateShellProfileAsync(
                 _workspace.Timeframe.ToString(),
                 CaptureLayoutProfile(),
                 CaptureInteractionProfile(),
@@ -525,7 +613,7 @@ internal sealed partial class MainForm
 
         try
         {
-            _modulePlatform.UpdateShellProfileAsync(
+            ModulePlatform.UpdateShellProfileAsync(
                     _workspace.Timeframe.ToString(),
                     CaptureLayoutProfile(),
                     CaptureInteractionProfile(),
@@ -556,18 +644,31 @@ internal sealed partial class MainForm
             ["crosshairVisible"] = _workspace.ShowCrosshair
         };
 
-    private void RecomposeModulePlan(long dataVersion)
+    private void RefreshModulePlanForCurrentSnapshot()
     {
-        if (!_modulePlatformReady) return;
-        _modulePlatform.Recompose(dataVersion);
-        _moduleRenderPlan = _modulePlatform.RenderPlan;
+        if (!_modulePlatformReady ||
+            !TryGetSelectedSnapshot(out Engine.SymbolSnapshot? snapshot) ||
+            snapshot.Version == _modulePlanDataVersion)
+        {
+            return;
+        }
+
+        _modulePlanDataVersion = snapshot.Version;
+        ModulePlatform.Recompose(snapshot.Version);
+        _moduleRenderPlan = ModulePlatform.RenderPlan;
+        UpdateModuleStatus();
+    }
+
+    private void UpdateModuleStatus()
+    {
+        _moduleStatusLabel.Text = GetModulePlatformSummary();
     }
 
     private string GetModulePlatformSummary()
     {
         if (!_modulePlatformReady) return "modules loading";
-        IReadOnlyList<ModuleHost.ChartModuleRuntimeSnapshot> snapshots =
-            _modulePlatform.GetSnapshots();
+        IReadOnlyList<ChartModuleRuntimeSnapshot> snapshots =
+            ModulePlatform.GetSnapshots();
         int enabled = snapshots.Count(static item => item.IsEnabled);
         int faulted = snapshots.Count(static item => item.IsFaulted);
         return $"modules {enabled}/{snapshots.Count} " +
