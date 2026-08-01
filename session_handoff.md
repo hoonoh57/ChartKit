@@ -1,6 +1,6 @@
 # ChartKit C# 세션 인수인계
 
-작성 시각: 2026-08-01 12:20 KST  
+작성 시각: 2026-08-01 12:43 KST  
 저장소: `hoonoh57/ChartKit`  
 작업 브랜치: `csharp/standalone-engine`  
 Draft PR: `#3 Build standalone C# multi-symbol chart engine`  
@@ -10,28 +10,18 @@ PR base: `improve/chart-engine-hardening`
 검증된 기능 코드 체크포인트:
 
 ```text
-b55f4b260beb87c9a5669289f1894f35d717ee51
-```
-
-이후 커밋은 인수인계 문서 갱신뿐이다. 현재 브랜치 HEAD가 위 체크포인트를 포함하는지는 다음으로 확인한다.
-
-```powershell
-git merge-base --is-ancestor `
-  b55f4b260beb87c9a5669289f1894f35d717ee51 `
-  HEAD
-
-$LASTEXITCODE   # 0이어야 함
+bd21cd849d44c5e4d892701326377b825f3af67d
 ```
 
 Windows CI:
 
 ```text
 ChartKit CSharp Engine
-run 30681571514
+run 30682726299
 result success
 
 ChartKit CSharp Legacy Inventory
-run 30681571493
+run 30682726300
 result success
 ```
 
@@ -41,13 +31,24 @@ result success
 checkpoint/csharp-120tick-source-order-pass
 checkpoint/csharp-rest-realtime-boundary-pass
 checkpoint/csharp-representative-trading-day-pass
+checkpoint/csharp-realtime-reconnect-pass
+```
+
+현재 브랜치가 검증 기능 코드를 포함하는지 확인:
+
+```powershell
+git merge-base --is-ancestor `
+  bd21cd849d44c5e4d892701326377b825f3af67d `
+  HEAD
+
+$LASTEXITCODE   # 0이어야 함
 ```
 
 ---
 
 # 0. 최상위 금지사항 — 틱 데이터 순서
 
-Cybos 틱 데이터는 `HHmm`까지만 제공될 수 있으므로 같은 분 안의 실제 체결 순서는 배열 위치로만 보존될 수 있다.
+Cybos 틱 데이터는 `HHmm`까지만 제공될 수 있으므로 같은 분 안의 실제 체결 순서는 배열 위치로 보존한다.
 
 금지:
 
@@ -176,9 +177,10 @@ REST seed 시각
 동일 시각 중복 제거 없음
 ```
 
-토요일 확인:
+휴장일 로컬 확인:
 
 ```text
+day closed
 ws registered
 boundary waiting
 events 0
@@ -186,13 +188,9 @@ stale 0
 errors 0
 ```
 
-장중 첫 체결 검증은 아직 남아 있다.
-
 ---
 
 # 4. 거래일·휴장 판정
-
-휴장일 달력을 유지하지 않고 대표종목 데이터로 판정한다.
 
 대표종목:
 
@@ -231,25 +229,6 @@ errors 0
 실시간 이벤트가 실제로 수신되면 no-data 판정보다 거래일을 우선한다.
 ```
 
-구현:
-
-```text
-csharp_chartkit/src/ChartKit.DataSources/TradingDayProbe.cs
-csharp_chartkit/src/ChartKit.App/MainForm.TradingDay.cs
-csharp_chartkit/src/ChartKit.App/MainForm.Shell.cs
-csharp_chartkit/tests/ChartKit.EngineVerification/TradingDayProbeVerification.cs
-```
-
-화면:
-
-```text
-하단: day trading / day closed / day unknown
-우측 거래일:
-  거래일, 대표 1분봉, 005930/000660
-  휴장, 대표 1분봉, 005930/000660 없음
-  확인불가, 대표종목 조회 오류
-```
-
 자동검증:
 
 ```text
@@ -260,7 +239,62 @@ csharp_trading_day_failure_unknown=PASS
 
 ---
 
-# 5. 로컬 반영
+# 5. WebSocket 재연결 자동검증
+
+실제 `ClientWebSocket` 경로를 테스트 가능한 내부 어댑터로 분리했다.
+
+구현:
+
+```text
+csharp_chartkit/src/ChartKit.DataSources/IKiwoomWebSocket.cs
+csharp_chartkit/src/ChartKit.DataSources/KiwoomRestDataSource.Realtime.cs
+csharp_chartkit/tests/ChartKit.EngineVerification/ScriptedKiwoomWebSocket.cs
+csharp_chartkit/tests/ChartKit.EngineVerification/KiwoomRealtimeReconnectVerification.cs
+```
+
+재현 시나리오:
+
+```text
+REST 5분봉 seed
+첫 WebSocket 연결
+LOGIN 1회
+REG 1회
+동일 seed 봉 Update
+연결 종료
+두 번째 WebSocket 연결
+LOGIN 1회
+REG 1회
+동일 봉 추가 Update
+다음 5분봉 Append
+```
+
+검증 내용:
+
+```text
+재연결 중 RealtimeCandleBuilder 유지
+첫 Update 거래량 105
+재연결 후 같은 봉 Update 거래량 112
+다음 봉 sequence 1 Append
+연결당 LOGIN 1회
+연결당 REG 1회
+ConnectionAttempts 2
+RegistrationCount 2
+stale 0
+```
+
+자동검증:
+
+```text
+csharp_realtime_reconnect_continuity=PASS
+csharp_realtime_one_registration_per_connection=PASS
+csharp_realtime_builder_survives_reconnect=PASS
+```
+
+동일 시각·동일 가격·동일 수량 체결은 중복으로 제거하지 않는다. 신뢰 가능한 공급자 고유 체결번호가 없기 때문이다.
+
+---
+
+# 6. 로컬 반영
 
 ```powershell
 Set-Location "E:\2026\gpt\vb\sciaChart\ChartKit"
@@ -274,7 +308,7 @@ git switch csharp/standalone-engine
 git pull --ff-only origin csharp/standalone-engine
 
 git merge-base --is-ancestor `
-  b55f4b260beb87c9a5669289f1894f35d717ee51 `
+  bd21cd849d44c5e4d892701326377b825f3af67d `
   HEAD
 
 $LASTEXITCODE
@@ -296,44 +330,62 @@ dotnet run `
   --count 4000
 ```
 
-토요일 기대:
+---
+
+# 7. 다음 작업 — 순서 고정
+
+## P1. 다음 거래일 실제 실시간 경계
 
 ```text
-day closed
-ws registered
-boundary waiting
-events 0
+day trading
+ws receiving
+첫 이벤트 seed-update 또는 seed-append
+events 증가
 stale 0
 errors 0
+중복 봉 0
+sequence 역전 0
 ```
 
-우측 패널:
+대표종목은 실제 체결이 많은 `005930` 또는 `000660`으로 먼저 검증한다.
+
+## P2. 실제 재연결
+
+장중 네트워크를 한 번 차단하거나 연결을 재시작하여 확인한다.
 
 ```text
-거래일  휴장, 대표 1분봉, 005930/000660 없음
+connection attempts 증가
+registration count도 연결당 1씩 증가
+reconnecting → registered → receiving
+현재 봉 상태 유지
+다음 봉 정상 append
+```
+
+## P3. soak
+
+```text
+1종목 6시간
+20종목 6시간
+100종목 replay 6시간
+종목·주기 100회 반복 변경
+최소화·복원
+메모리·핸들·GDI 지속 관찰
+```
+
+## 이후
+
+```text
+Core Candidate 1 동결
+Range Navigator와 과거 데이터 지연 로딩
+지표·패널 plugin
+작도·전략·주문 overlay
+다중 차트
+GPU A/B
 ```
 
 ---
 
-# 6. 다음 작업
-
-1. 토요일 최신 빌드에서 `day closed` 실제 확인
-2. 거래일 장중 `day trading` 확인
-3. 첫 WebSocket 체결의 `seed-update` 또는 `seed-append` 확인
-4. stale 0, 중복 봉 0, sequence 역전 0 확인
-5. 1종목 6시간 soak
-6. 20종목 6시간 soak
-7. 종목·주기 100회 반복 변경
-8. Core Candidate 1 동결
-9. Range Navigator와 과거 데이터 지연 로딩
-10. 지표·패널 plugin
-11. 작도·전략·주문 overlay
-12. 다중 차트
-13. GPU A/B
-
----
-
-# 7. 하지 말아야 할 실수
+# 8. 하지 말아야 할 실수
 
 ```text
 틱 데이터를 시간으로 정렬
@@ -342,6 +394,8 @@ errors 0
 과거 휴장일 판정에 분봉 사용
 대표종목 probe로 realtime seed 덮어쓰기
 조회 실패를 휴장으로 판정
+동일 시각/가격/수량만으로 실시간 체결 중복 제거
+재연결마다 RealtimeCandleBuilder 초기화
 CI 실패 코드를 로컬 pull 대상으로 안내
 Draft PR 병합
 ```
