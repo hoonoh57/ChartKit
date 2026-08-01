@@ -209,7 +209,6 @@ public sealed class SceneCompiler
             if (module.Contributions is null)
                 throw new InvalidOperationException("Contributions are required.");
 
-            RenderPrimitiveStyle style = ParseStyle(module.Style);
             foreach (ChartContribution contribution in module.Contributions)
             {
                 if (!StringComparer.Ordinal.Equals(
@@ -227,6 +226,9 @@ public sealed class SceneCompiler
                     throw new InvalidOperationException(
                         $"Duplicate chart object identity: {contribution.Identity}");
 
+                RenderPrimitiveStyle style = ParseStyle(
+                    module.Style,
+                    contribution.Identity.ObjectId);
                 plans.Add(new RenderPrimitivePlan(
                     contribution.Identity,
                     contribution.PanelId,
@@ -259,13 +261,36 @@ public sealed class SceneCompiler
         return new ChartRenderPlan(plans);
     }
 
-    private static RenderPrimitiveStyle ParseStyle(JsonObject source)
+    private static RenderPrimitiveStyle ParseStyle(
+        JsonObject source,
+        string objectId)
     {
         ArgumentNullException.ThrowIfNull(source);
-        string stroke = ReadString(source, "stroke", "accent", allowBlank: false);
-        string fill = ReadString(source, "fill", string.Empty, allowBlank: true);
-        float strokeWidth = ReadSingle(source, "strokeWidth", 1.5f, 0.01f, 64f);
-        float opacity = ReadSingle(source, "opacity", 1f, 0f, 1f);
+        if (string.IsNullOrWhiteSpace(objectId))
+            throw new ArgumentException("ObjectId is required.", nameof(objectId));
+
+        string stroke = ReadString(
+            source,
+            objectId + ".stroke",
+            ReadString(source, "stroke", "accent", allowBlank: false),
+            allowBlank: false);
+        string fill = ReadString(
+            source,
+            objectId + ".fill",
+            ReadString(source, "fill", string.Empty, allowBlank: true),
+            allowBlank: true);
+        float strokeWidth = ReadSingle(
+            source,
+            objectId + ".strokeWidth",
+            ReadSingle(source, "strokeWidth", 1.5f, 0.01f, 64f),
+            0.01f,
+            64f);
+        float opacity = ReadSingle(
+            source,
+            objectId + ".opacity",
+            ReadSingle(source, "opacity", 1f, 0f, 1f),
+            0f,
+            1f);
         return new RenderPrimitiveStyle(stroke, fill, strokeWidth, opacity);
     }
 
