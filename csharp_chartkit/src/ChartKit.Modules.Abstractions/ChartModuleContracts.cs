@@ -74,9 +74,9 @@ public sealed record ChartModuleProfile
     public bool IsEnabled { get; init; }
     public int ZIndex { get; init; }
     public string Placement { get; init; } = "price.main";
-    public JsonObject Parameters { get; init; } = [];
-    public JsonObject Style { get; init; } = [];
-    public JsonObject PersistentState { get; init; } = [];
+    public JsonObject Parameters { get; init; } = new();
+    public JsonObject Style { get; init; } = new();
+    public JsonObject PersistentState { get; init; } = new();
 }
 
 public interface IChartModule
