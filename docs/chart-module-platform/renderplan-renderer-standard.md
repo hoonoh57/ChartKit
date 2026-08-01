@@ -61,6 +61,17 @@ visibleIndex = RenderPoint.X - ChartWindow.StartIndex
 pixelX       = ChartFrame.X(visibleIndex)
 ```
 
+Production App은 재합성할 때 현재 가시 구간을 `ChartVisualContext`로 전달한다.
+
+```text
+VisibleStartIndex
+VisibleEndExclusive
+```
+
+점 기반 모듈은 이 범위 안의 절대 X를 생성해야 한다. `0,1,2` 같은 고정 절대 인덱스는 전체 데이터의 처음 세 봉을 뜻하며, 현재 viewport가 뒤쪽 구간이면 Renderer에서 정상적으로 제외된다. `PlatformProbeModule`은 가시 구간의 약 25%, 50%, 75% 지점에 세 점을 배치한다.
+
+기존 3개 인자 `ChartVisualContext` 생성은 계약 호환을 위해 유지하지만, Production App은 가시 구간 없는 재합성에 의존하지 않는다. 종목·주기·viewport Start/End 또는 데이터 버전이 변하면 App이 새 VisualContext로 재합성한다.
+
 현재 표준 PanelId:
 
 ```text
@@ -171,6 +182,7 @@ SKPath
 검증 기준:
 
 ```text
+가시 구간 StartIndex > 0인 fixture에서 모든 RenderPoint.X가 구간 내부
 200회 steady-state 렌더 managed allocation ≤ 32,768 bytes
 panel clip 밖 style pixel 0
 알 수 없는 panel 격리
@@ -183,6 +195,7 @@ Rendering 참조 경계 유지
 ```text
 [ ] Release 빌드 오류 0, 신규 C# 경고 0
 [ ] module header contract PASS
+[ ] csharp_renderplan_renderer_visible_range=PASS
 [ ] PlatformProbe Polyline 실제 pixel 출력
 [ ] Profile stroke style 실제 pixel 반영
 [ ] Panel clip PASS
@@ -195,6 +208,7 @@ Rendering 참조 경계 유지
 [ ] 기존 EngineVerification 전체 PASS
 [ ] App self-test PASS
 [ ] Replay desktop에서 On/Off 즉시 표시·삭제
+[ ] 확대·축소·이동 후 현재 viewport 안에서 재표시
 [ ] 창 종료·재실행 후 On/Off·색상 복원
 ```
 
