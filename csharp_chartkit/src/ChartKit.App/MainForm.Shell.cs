@@ -286,6 +286,7 @@ internal sealed partial class MainForm
         AddInfoRow("코드", "Code");
         AddInfoRow("종목명", "Name");
         AddInfoRow("시장", "Market");
+        AddInfoRow("거래일", "TradingDay");
         AddInfoRow("데이터", "Source");
         AddInfoRow("주기", "Timeframe");
         AddInfoRow("봉수", "Counts");
@@ -329,6 +330,7 @@ internal sealed partial class MainForm
         ChartWindow window,
         EngineMetrics metrics)
     {
+        EnsureTradingDayProbeStarted();
         string name = _selectedMetadata?.DisplayName ?? _selectedSymbol;
         RealtimeDiagnosticsSnapshot realtime = GetRealtimeDiagnostics();
         _symbolNameLabel.Text = name;
@@ -339,6 +341,7 @@ internal sealed partial class MainForm
             $"{_source.Name} | {_workspace.Timeframe} | " +
             $"gap {window.RightBlankBars:N0} offset {_viewport.RightOffsetBars:N0} | " +
             $"events {metrics.ProcessedEvents:N0} queue {metrics.MaxQueueDepth:N0} | " +
+            $"day {FormatTradingDayStatus(realtime)} " +
             $"ws {FormatConnectionState(realtime.ConnectionState)} " +
             $"boundary {FormatBoundaryState(realtime.BoundaryState)} " +
             $"stale {realtime.RejectedStaleEvents:N0} | " +
@@ -356,6 +359,7 @@ internal sealed partial class MainForm
         SetInfoValue("Code", _selectedSymbol);
         SetInfoValue("Name", _selectedMetadata?.DisplayName ?? _selectedSymbol);
         SetInfoValue("Market", _selectedMetadata?.Market ?? "-");
+        SetInfoValue("TradingDay", FormatTradingDaySummary(realtime));
         SetInfoValue("Source", _selectedMetadata?.Source ?? _source.Name);
         SetInfoValue("Timeframe", _workspace.Timeframe.ToString());
         SetInfoValue(
