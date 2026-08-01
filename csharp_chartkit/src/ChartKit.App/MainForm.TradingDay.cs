@@ -37,7 +37,7 @@ internal sealed partial class MainForm
                     ? await probeSource.ProbeTradingDayAsync(
                         today,
                         _stop.Token)
-                    : TradingDayProbeSnapshot.Empty(today);
+                    : CreateUnsupportedProbe(today);
             lock (_tradingDayProbeGate)
                 _tradingDayProbe = result;
         }
@@ -49,6 +49,18 @@ internal sealed partial class MainForm
             Interlocked.Exchange(ref _tradingDayProbeRunning, 0);
         }
     }
+
+    private static TradingDayProbeSnapshot CreateUnsupportedProbe(DateTime date) =>
+        new(
+            date.Date,
+            TradingDayProbeState.Unknown,
+            TradingDayProbeMethod.None,
+            [],
+            [],
+            0,
+            0,
+            DateTimeOffset.UtcNow,
+            string.Empty);
 
     private TradingDayProbeSnapshot GetTradingDayProbeSnapshot()
     {
