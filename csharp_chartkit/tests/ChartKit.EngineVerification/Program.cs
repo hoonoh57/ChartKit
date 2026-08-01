@@ -16,6 +16,7 @@ try
     UiMetadataVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
+    await RenderPlanRenderingVerification.RunAsync();
     MarketDataNormalizerVerification.Run();
     TickDataVerification.Run();
     await ReplayDataVerification.RunAsync();

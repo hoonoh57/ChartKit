@@ -33,7 +33,8 @@ internal sealed class ChartModulePlatformController : IDisposable
     private readonly ChartPropertyMutationService _propertyMutation;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private ChartProfile? _profile;
-    private ChartRenderPlan _renderPlan = new(Array.Empty<RenderPrimitivePlan>());
+    private ChartRenderPlan _renderPlan = ChartRenderPlan.Empty;
+    private ChartVisualContext _visualContext = new(0, 0, 0);
     private bool _disposed;
 
     public ChartModulePlatformController(string profilePath)
@@ -72,7 +73,7 @@ internal sealed class ChartModulePlatformController : IDisposable
         ChartProfile normalized = EnsureRegisteredDefaults(loaded);
         ApplyRegisteredProfiles(normalized.Modules);
         _profile = normalized;
-        Recompose();
+        RecomposeCurrent();
         return CloneProfile(normalized);
     }
 
@@ -133,7 +134,7 @@ internal sealed class ChartModulePlatformController : IDisposable
         if (operation.Changed)
         {
             RefreshProfileFromHost();
-            Recompose();
+            RecomposeCurrent();
             await SaveCurrentAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -155,7 +156,7 @@ internal sealed class ChartModulePlatformController : IDisposable
             return result;
 
         RefreshProfileFromHost();
-        Recompose();
+        RecomposeCurrent();
         await SaveCurrentAsync(cancellationToken).ConfigureAwait(false);
         return result;
     }
@@ -209,11 +210,36 @@ internal sealed class ChartModulePlatformController : IDisposable
     {
         ThrowIfDisposed();
         EnsureInitialized();
-        _renderPlan = _composition.Compose(
-            new ChartVisualContext(
-                dataVersion,
-                viewportVersion,
-                themeVersion));
+        _visualContext = _visualContext with
+        {
+            DataVersion = dataVersion,
+            ViewportVersion = viewportVersion,
+            ThemeVersion = themeVersion
+        };
+        RecomposeCurrent();
+    }
+
+    public void Recompose(
+        long dataVersion,
+        long viewportVersion,
+        long themeVersion,
+        int visibleStartIndex,
+        int visibleEndExclusive)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        if (visibleStartIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(visibleStartIndex));
+        if (visibleEndExclusive <= visibleStartIndex)
+            throw new ArgumentOutOfRangeException(nameof(visibleEndExclusive));
+
+        _visualContext = new ChartVisualContext(
+            dataVersion,
+            viewportVersion,
+            themeVersion,
+            visibleStartIndex,
+            visibleEndExclusive);
+        RecomposeCurrent();
     }
 
     public IReadOnlyList<ChartModuleRuntimeSnapshot> GetSnapshots()
@@ -228,6 +254,11 @@ internal sealed class ChartModulePlatformController : IDisposable
         if (_disposed) return;
         _disposed = true;
         _saveGate.Dispose();
+    }
+
+    private void RecomposeCurrent()
+    {
+        _renderPlan = _composition.Compose(_visualContext);
     }
 
     private ChartProfile CreateDefaultProfile(string timeframe) =>

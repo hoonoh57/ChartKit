@@ -23,6 +23,7 @@ internal sealed partial class MainForm : Form
     private readonly ChartLegendBuilder _legendBuilder = new();
     private readonly ChartLegendFrame _legendFrame = new();
     private readonly SkiaChartRenderer _renderer = new();
+    private readonly SkiaChartRenderPlanRenderer _modulePlanRenderer = new();
     private readonly ChartLegendRenderer _legendRenderer = new();
     private readonly ChartCrosshairRenderer _crosshairRenderer = new();
     private readonly CancellationTokenSource _stop = new();
@@ -349,6 +350,10 @@ internal sealed partial class MainForm : Form
             snapshot,
             _chartFrame,
             _workspace.RenderOptions);
+        _modulePlanRenderer.Render(
+            e.Surface.Canvas,
+            _moduleRenderPlan,
+            _chartFrame);
 
         if (_workspace.ShowLegend)
         {
@@ -631,6 +636,7 @@ internal sealed partial class MainForm : Form
         _engine.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _crosshairRenderer.Dispose();
         _legendRenderer.Dispose();
+        _modulePlanRenderer.Dispose();
         _renderer.Dispose();
         _frameTimer.Dispose();
         _reloadGate.Dispose();

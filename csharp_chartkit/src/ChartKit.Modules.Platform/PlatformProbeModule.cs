@@ -131,6 +131,7 @@ public sealed class PlatformProbeModule :
         if (!_isActive || _panelId is null)
             return;
 
+        (long firstX, long middleX, long lastX) = ResolveProbeX(context);
         writer.Add(new ChartContribution(
             new ChartObjectIdentity(
                 Definition.ModuleId,
@@ -140,9 +141,9 @@ public sealed class PlatformProbeModule :
             ChartPrimitiveKind.Polyline,
             _zIndex,
             [
-                new ChartSeriesPoint(0, _level),
-                new ChartSeriesPoint(1, _level + _amplitude),
-                new ChartSeriesPoint(2, _level)
+                new ChartSeriesPoint(firstX, _level),
+                new ChartSeriesPoint(middleX, _level + _amplitude),
+                new ChartSeriesPoint(lastX, _level)
             ]));
     }
 
@@ -189,6 +190,27 @@ public sealed class PlatformProbeModule :
             ChartCommandPlacement.ContextMenu |
             ChartCommandPlacement.QuickToolbar |
             ChartCommandPlacement.PropertyInspector));
+    }
+
+    private static (long First, long Middle, long Last) ResolveProbeX(
+        ChartVisualContext context)
+    {
+        if (!context.HasVisibleRange)
+            return (0L, 1L, 2L);
+
+        long start = context.VisibleStartIndex;
+        long last = context.VisibleEndExclusive - 1L;
+        long distance = Math.Max(0L, last - start);
+        long first = start + distance / 4L;
+        long middle = start + distance / 2L;
+        long third = start + distance * 3L / 4L;
+
+        if (middle <= first && last > first)
+            middle = first + 1L;
+        if (third <= middle && last > middle)
+            third = last;
+
+        return (first, middle, third);
     }
 
     private static double ReadFiniteDouble(
