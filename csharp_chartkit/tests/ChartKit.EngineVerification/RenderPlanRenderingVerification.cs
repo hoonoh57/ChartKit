@@ -35,8 +35,12 @@ internal static class RenderPlanRenderingVerification
                 "Render-plan snapshot was not published.");
         }
 
-        var viewport = new ChartViewport(240, 20, 500);
+        var viewport = new ChartViewport(40, 20, 500);
         ChartWindow window = viewport.Resolve(snapshot.Candles.Length);
+        if (window.StartIndex <= 0)
+            throw new InvalidOperationException(
+                "Visible-window fixture must start after candle index zero.");
+
         var frame = new ChartFrame();
         new ChartFrameBuilder().Build(
             snapshot,
@@ -79,7 +83,12 @@ internal static class RenderPlanRenderingVerification
                 "Render-plan platform probe could not be hosted: " + hosted.Error);
 
         ChartRenderPlan plan = composition.Compose(
-            new ChartVisualContext(1, 1, 1));
+            new ChartVisualContext(
+                1,
+                1,
+                1,
+                window.StartIndex,
+                window.EndExclusive));
         if (plan.Primitives.Count != 1 ||
             plan.Primitives[0].RenderKind != RenderPrimitiveKind.Polyline ||
             plan.Primitives[0].RenderPoints.Count != 3 ||
@@ -88,6 +97,16 @@ internal static class RenderPlanRenderingVerification
         {
             throw new InvalidOperationException(
                 "Scene did not produce a renderer-ready styled primitive.");
+        }
+
+        RenderPrimitivePlan probe = plan.Primitives[0];
+        if (probe.RenderPoints.Any(point =>
+                point.X < window.StartIndex || point.X >= window.EndExclusive) ||
+            probe.RenderPoints.Select(static point => point.X)
+                .SequenceEqual([0L, 1L, 2L]))
+        {
+            throw new InvalidOperationException(
+                "Platform probe did not use absolute indices in the visible window.");
         }
 
         using var bitmap = new SKBitmap(
@@ -133,6 +152,7 @@ internal static class RenderPlanRenderingVerification
         Console.WriteLine(
             "csharp_renderplan_renderer_release_configuration=PASS");
 #endif
+        Console.WriteLine("csharp_renderplan_renderer_visible_range=PASS");
         Console.WriteLine("csharp_renderplan_renderer_polyline=PASS");
         Console.WriteLine("csharp_renderplan_renderer_style=PASS");
         Console.WriteLine("csharp_renderplan_renderer_panel_clip=PASS");
