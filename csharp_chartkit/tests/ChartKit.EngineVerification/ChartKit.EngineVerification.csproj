@@ -9,5 +9,7 @@
     <ProjectReference Include="..\..\src\ChartKit.Engine\ChartKit.Engine.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Rendering\ChartKit.Rendering.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.DataSources\ChartKit.DataSources.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Modules.Abstractions\ChartKit.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Scene\ChartKit.Scene.csproj" />
   </ItemGroup>
 </Project>
