@@ -12,6 +12,7 @@ try
     ModulePlatformContractVerification.Run();
     ModuleHostVerification.Run();
     CompositionProbeVerification.Run();
+    await ProfilePersistenceVerification.RunAsync();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     MarketDataNormalizerVerification.Run();

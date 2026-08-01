@@ -14,5 +14,6 @@
     <ProjectReference Include="..\..\src\ChartKit.ModuleHost\ChartKit.ModuleHost.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Modules.Platform\ChartKit.Modules.Platform.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Composition\ChartKit.Composition.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Persistence\ChartKit.Persistence.csproj" />
   </ItemGroup>
 </Project>
