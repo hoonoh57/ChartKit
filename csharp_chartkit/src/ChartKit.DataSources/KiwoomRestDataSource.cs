@@ -11,6 +11,7 @@ public sealed partial class KiwoomRestDataSource :
 {
     private readonly KiwoomApiSession _session;
     private readonly bool _ownsSession;
+    private readonly Func<IKiwoomWebSocket> _webSocketFactory;
     private readonly ConcurrentDictionary<string, RealtimeSeed> _realtimeSeeds =
         new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, RealtimeDiagnosticsState>
@@ -20,7 +21,20 @@ public sealed partial class KiwoomRestDataSource :
     public KiwoomRestDataSource(
         KiwoomOptions? options = null,
         KiwoomApiSession? session = null)
+        : this(
+            options,
+            session,
+            static () => new ClientKiwoomWebSocket())
     {
+    }
+
+    internal KiwoomRestDataSource(
+        KiwoomOptions? options,
+        KiwoomApiSession? session,
+        Func<IKiwoomWebSocket> webSocketFactory)
+    {
+        _webSocketFactory = webSocketFactory ??
+            throw new ArgumentNullException(nameof(webSocketFactory));
         if (session is not null)
         {
             _session = session;
