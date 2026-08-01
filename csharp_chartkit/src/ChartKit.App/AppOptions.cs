@@ -16,7 +16,8 @@ internal sealed record AppOptions(
     string[] Symbols,
     CandleTimeframe Timeframe,
     int HistoryCount,
-    int RealtimeProbeSeconds)
+    int RealtimeProbeSeconds,
+    string ProfilePath)
 {
     public static AppOptions Parse(string[] args)
     {
@@ -25,6 +26,7 @@ internal sealed record AppOptions(
         CandleTimeframe timeframe = CandleTimeframe.Minute(1);
         int historyCount = 240;
         int realtimeProbeSeconds = 0;
+        string profilePath = GetDefaultProfilePath();
 
         for (int index = 0; index < args.Length; index++)
         {
@@ -60,6 +62,10 @@ internal sealed record AppOptions(
                     realtimeProbeSeconds = ParseNonNegativeInt(
                         RequiredValue(args, ref index, argument), argument);
                     break;
+                case "--profile":
+                    profilePath = Path.GetFullPath(
+                        RequiredValue(args, ref index, argument));
+                    break;
                 default:
                     throw new ArgumentException($"Unknown argument: {argument}");
             }
@@ -92,10 +98,11 @@ internal sealed record AppOptions(
             normalized,
             timeframe,
             historyCount,
-            realtimeProbeSeconds);
+            realtimeProbeSeconds,
+            profilePath);
     }
 
-    private static CandleTimeframe ParseTimeframe(string value)
+    internal static CandleTimeframe ParseTimeframe(string value)
     {
         string text = value.Trim();
         if (text.Equals("D", StringComparison.OrdinalIgnoreCase)) return CandleTimeframe.Day;
@@ -106,6 +113,31 @@ internal sealed record AppOptions(
         if (text.EndsWith("m", StringComparison.OrdinalIgnoreCase))
             return CandleTimeframe.Minute(ParsePositiveInt(text[..^1], "timeframe"));
         throw new ArgumentException($"Unsupported timeframe: {value}");
+    }
+
+    internal static bool TryParseTimeframe(
+        string value,
+        out CandleTimeframe timeframe)
+    {
+        try
+        {
+            timeframe = ParseTimeframe(value);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            timeframe = default;
+            return false;
+        }
+    }
+
+    private static string GetDefaultProfilePath()
+    {
+        string root = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(root))
+            root = AppContext.BaseDirectory;
+        return Path.Combine(root, "ChartKit", "chart-profile.json");
     }
 
     private static string RequiredValue(string[] args, ref int index, string option)
