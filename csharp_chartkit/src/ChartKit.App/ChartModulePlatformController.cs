@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using ChartKit.CSharp.Composition;
 using ChartKit.CSharp.ModuleHost;
 using ChartKit.CSharp.Modules.Abstractions;
+using ChartKit.CSharp.Modules.Indicators;
 using ChartKit.CSharp.Modules.Platform;
 using ChartKit.CSharp.Persistence;
 using ChartKit.CSharp.Scene;
@@ -32,15 +33,19 @@ internal sealed class ChartModulePlatformController : IDisposable
     private readonly ChartModuleUiCatalog _uiCatalog;
     private readonly ChartPropertyMutationService _propertyMutation;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private readonly SemaphoreSlim _dataGate = new(1, 1);
     private ChartProfile? _profile;
     private ChartRenderPlan _renderPlan = ChartRenderPlan.Empty;
     private ChartVisualContext _visualContext = new(0, 0, 0);
+    private ChartPrimarySeriesSnapshot _primarySeries =
+        ChartPrimarySeriesSnapshot.Empty;
     private bool _disposed;
 
     public ChartModulePlatformController(string profilePath)
     {
         _profilePath = RequirePath(profilePath);
         _registry.Register<PlatformProbeModule>();
+        _registry.Register<SmaModule>();
         _host = new ChartModuleHost(_registry);
         _composition = new ChartCompositionService(_host);
         _uiCatalog = new ChartModuleUiCatalog(_registry, _host, _selection);
@@ -134,6 +139,11 @@ internal sealed class ChartModulePlatformController : IDisposable
         if (operation.Changed)
         {
             RefreshProfileFromHost();
+            if (!command.IsChecked && _primarySeries.Bars.Count > 0)
+            {
+                await ApplyCurrentPrimarySeriesAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
             RecomposeCurrent();
             await SaveCurrentAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -156,9 +166,51 @@ internal sealed class ChartModulePlatformController : IDisposable
             return result;
 
         RefreshProfileFromHost();
+        if (result.ChangeImpact >= ChartChangeImpact.RecalculateModule &&
+            _primarySeries.Bars.Count > 0)
+        {
+            await ApplyCurrentPrimarySeriesAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
         RecomposeCurrent();
         await SaveCurrentAsync(cancellationToken).ConfigureAwait(false);
         return result;
+    }
+
+    public async Task<ChartModuleDataUpdateResult> UpdatePrimarySeriesAsync(
+        ChartPrimarySeriesSnapshot snapshot,
+        long viewportVersion,
+        long themeVersion,
+        int visibleStartIndex,
+        int visibleEndExclusive,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ThrowIfDisposed();
+        EnsureInitialized();
+        ValidateVisibleRange(visibleStartIndex, visibleEndExclusive);
+
+        await _dataGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ChartModuleDataUpdateResult result = await Task.Run(
+                    () => _host.ApplyPrimarySeries(snapshot),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            _primarySeries = snapshot;
+            _visualContext = new ChartVisualContext(
+                snapshot.DataVersion,
+                viewportVersion,
+                themeVersion,
+                visibleStartIndex,
+                visibleEndExclusive);
+            RecomposeCurrent();
+            return result;
+        }
+        finally
+        {
+            _dataGate.Release();
+        }
     }
 
     public async Task UpdateShellProfileAsync(
@@ -228,10 +280,7 @@ internal sealed class ChartModulePlatformController : IDisposable
     {
         ThrowIfDisposed();
         EnsureInitialized();
-        if (visibleStartIndex < 0)
-            throw new ArgumentOutOfRangeException(nameof(visibleStartIndex));
-        if (visibleEndExclusive <= visibleStartIndex)
-            throw new ArgumentOutOfRangeException(nameof(visibleEndExclusive));
+        ValidateVisibleRange(visibleStartIndex, visibleEndExclusive);
 
         _visualContext = new ChartVisualContext(
             dataVersion,
@@ -254,6 +303,24 @@ internal sealed class ChartModulePlatformController : IDisposable
         if (_disposed) return;
         _disposed = true;
         _saveGate.Dispose();
+        _dataGate.Dispose();
+    }
+
+    private async Task<ChartModuleDataUpdateResult>
+        ApplyCurrentPrimarySeriesAsync(CancellationToken cancellationToken)
+    {
+        await _dataGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await Task.Run(
+                    () => _host.ApplyPrimarySeries(_primarySeries),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _dataGate.Release();
+        }
     }
 
     private void RecomposeCurrent()
@@ -399,6 +466,16 @@ internal sealed class ChartModulePlatformController : IDisposable
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    private static void ValidateVisibleRange(
+        int visibleStartIndex,
+        int visibleEndExclusive)
+    {
+        if (visibleStartIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(visibleStartIndex));
+        if (visibleEndExclusive <= visibleStartIndex)
+            throw new ArgumentOutOfRangeException(nameof(visibleEndExclusive));
     }
 
     private static string RequirePath(string? value)
