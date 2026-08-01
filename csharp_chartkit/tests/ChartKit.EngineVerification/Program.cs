@@ -20,6 +20,7 @@ try
     SuperTrendModuleParityVerification.Run();
     JmaModuleParityVerification.Run();
     ObvModuleParityVerification.Run();
+    DisparityModuleParityVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     await RenderPlanRenderingVerification.RunAsync();
