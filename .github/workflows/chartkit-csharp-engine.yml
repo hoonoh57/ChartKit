@@ -6,6 +6,8 @@ on:
       - improve/chart-engine-hardening
     paths:
       - 'csharp_chartkit/**'
+      - 'docs/chart-module-platform/**'
+      - 'scripts/verify_chart_module_headers.ps1'
       - '.github/workflows/chartkit-csharp-engine.yml'
   workflow_dispatch:
 
@@ -36,6 +38,10 @@ jobs:
             throw 'CSharp product solution contains a migration-only dependency.'
           }
           Write-Host 'csharp_product_boundary=PASS'
+
+      - name: Verify chart module file contracts
+        shell: pwsh
+        run: .\scripts\verify_chart_module_headers.ps1
 
       - name: Reject DataSources row-reordering APIs
         shell: pwsh
