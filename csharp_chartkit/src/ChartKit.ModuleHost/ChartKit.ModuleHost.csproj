@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>ChartKit.CSharp.ModuleHost</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ChartKit.Modules.Abstractions\ChartKit.Modules.Abstractions.csproj" />
+  </ItemGroup>
+</Project>
