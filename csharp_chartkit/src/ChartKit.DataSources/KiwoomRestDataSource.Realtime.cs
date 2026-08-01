@@ -74,13 +74,27 @@ public sealed partial class KiwoomRestDataSource
             }
             builders[symbol] = new RealtimeCandleBuilder(
                 timeframe, seedCandle, seedTickCount);
+            ResetRealtimeDiagnostics(
+                symbol,
+                timeframe,
+                seedCandle,
+                seedTickCount);
         }
 
         Exception? terminal = null;
+        bool reconnecting = false;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                foreach (string symbol in symbols)
+                {
+                    if (TryGetRealtimeDiagnosticsState(
+                            symbol,
+                            out RealtimeDiagnosticsState? diagnostics))
+                        diagnostics.RecordConnectionAttempt(reconnecting);
+                }
+
                 string token = await _session.GetAccessTokenAsync(cancellationToken)
                     .ConfigureAwait(false);
                 try
@@ -89,6 +103,9 @@ public sealed partial class KiwoomRestDataSource
                     await socket.ConnectAsync(
                         _session.Options.WebSocketUri,
                         cancellationToken).ConfigureAwait(false);
+                    SetRealtimeConnectionState(
+                        symbols,
+                        RealtimeConnectionState.Connected);
                     await SendJsonAsync(socket, new Dictionary<string, object>
                     {
                         ["trnm"] = "LOGIN",
@@ -101,6 +118,10 @@ public sealed partial class KiwoomRestDataSource
                         builders,
                         writer,
                         cancellationToken).ConfigureAwait(false);
+                    reconnecting = true;
+                    SetRealtimeConnectionState(
+                        symbols,
+                        RealtimeConnectionState.Reconnecting);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -109,6 +130,11 @@ public sealed partial class KiwoomRestDataSource
                 catch (Exception exception)
                 {
                     terminal = exception;
+                    reconnecting = true;
+                    SetRealtimeConnectionState(
+                        symbols,
+                        RealtimeConnectionState.Faulted,
+                        exception.Message);
                     await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -119,6 +145,10 @@ public sealed partial class KiwoomRestDataSource
         }
         finally
         {
+            SetRealtimeConnectionState(
+                symbols,
+                RealtimeConnectionState.Stopped,
+                terminal?.Message);
             writer.TryComplete(cancellationToken.IsCancellationRequested ? null : terminal);
         }
     }
@@ -149,6 +179,9 @@ public sealed partial class KiwoomRestDataSource
                             "Kiwoom WebSocket login failed: " +
                             KiwoomJson.Text(root, "return_msg"));
                     }
+                    SetRealtimeConnectionState(
+                        symbols,
+                        RealtimeConnectionState.LoggedIn);
                     await SendRegistrationAsync(socket, symbols, cancellationToken)
                         .ConfigureAwait(false);
                     break;
@@ -163,6 +196,13 @@ public sealed partial class KiwoomRestDataSource
                         throw new InvalidOperationException(
                             "Kiwoom realtime registration failed: " +
                             KiwoomJson.Text(root, "return_msg"));
+                    foreach (string symbol in symbols)
+                    {
+                        if (TryGetRealtimeDiagnosticsState(
+                                symbol,
+                                out RealtimeDiagnosticsState? diagnostics))
+                            diagnostics.RecordRegistration();
+                    }
                     break;
 
                 case "REAL":
@@ -174,7 +214,7 @@ public sealed partial class KiwoomRestDataSource
         }
     }
 
-    private static async Task ProcessRealtimeAsync(
+    private async Task ProcessRealtimeAsync(
         JsonElement root,
         Dictionary<string, RealtimeCandleBuilder> builders,
         ChannelWriter<CandleEvent> writer,
@@ -197,13 +237,25 @@ public sealed partial class KiwoomRestDataSource
             if (!rawPrice.HasValue) continue;
             double rawQuantity = KiwoomJson.RealtimeNumber(values, "15") ?? 0d;
             DateTime tradeTime = ParseRealtimeTime(KiwoomJson.Text(values, "20"));
+            bool hadSeed = builder.HasSeed;
             if (!builder.TryApply(
                     tradeTime,
                     (float)Math.Abs(rawPrice.Value),
                     (long)Math.Abs(rawQuantity),
                     out MarketEventKind kind,
                     out Candle candle))
+            {
+                if (TryGetRealtimeDiagnosticsState(
+                        symbol,
+                        out RealtimeDiagnosticsState? rejectedDiagnostics))
+                    rejectedDiagnostics.RecordRejectedStale(tradeTime);
                 continue;
+            }
+
+            if (TryGetRealtimeDiagnosticsState(
+                    symbol,
+                    out RealtimeDiagnosticsState? acceptedDiagnostics))
+                acceptedDiagnostics.RecordAccepted(tradeTime, kind, hadSeed);
 
             await writer.WriteAsync(
                 CandleEvent.Create(symbol, kind, candle, candle.Sequence),
