@@ -16,7 +16,7 @@ internal static class Program
                 ApplicationMode.KiwoomProbe =>
                     ConsoleModes.RunProbeAsync(options).GetAwaiter().GetResult(),
                 ApplicationMode.SelfTest =>
-                    ConsoleModes.RunSelfTestAsync(options).GetAwaiter().GetResult(),
+                    AppSelfTestRunner.RunAsync(options).GetAwaiter().GetResult(),
                 _ => RunDesktop(options)
             };
         }
