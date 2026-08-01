@@ -104,10 +104,13 @@ public sealed class ChartModuleUiCatalog
         IReadOnlyDictionary<string, ChartModuleRuntimeSnapshot>
             snapshotByInstance)
     {
-        if (!selection.HasValue ||
-            !snapshotByInstance.TryGetValue(
+        if (!selection.HasValue)
+            return Array.Empty<ChartUiPropertyItem>();
+
+        if (!snapshotByInstance.TryGetValue(
                 selection.Value.InstanceId,
                 out ChartModuleRuntimeSnapshot? snapshot) ||
+            snapshot is null ||
             !StringComparer.Ordinal.Equals(
                 selection.Value.ModuleId,
                 snapshot.ModuleId))
