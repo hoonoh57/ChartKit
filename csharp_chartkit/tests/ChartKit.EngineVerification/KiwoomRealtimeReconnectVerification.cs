@@ -23,7 +23,8 @@ internal static class KiwoomRealtimeReconnectVerification
             Message(Realtime(symbol, "20260803090400", 104, 7)),
             Message(Realtime(symbol, "20260803090500", 105, 9)));
 
-        var sockets = new Queue<IKiwoomWebSocket>([firstSocket, secondSocket]);
+        var sockets = new Queue<IKiwoomWebSocket>(
+            new IKiwoomWebSocket[] { firstSocket, secondSocket });
         var socketGate = new object();
         IKiwoomWebSocket CreateSocket()
         {
@@ -62,8 +63,8 @@ internal static class KiwoomRealtimeReconnectVerification
             new FakeKiwoomClock());
         await using var source = new KiwoomRestDataSource(
             options: null,
-            session,
-            CreateSocket);
+            session: session,
+            webSocketFactory: CreateSocket);
 
         IReadOnlyList<Candle> history = await source.GetHistoryAsync(
             new HistoryRequest(symbol, CandleTimeframe.Minute(5), 1),
