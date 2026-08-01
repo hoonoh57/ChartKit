@@ -90,12 +90,42 @@ internal static class CompositionProbeVerification
         var commands = new CommandWriter();
         module.DescribeProperties(properties);
         module.DescribeCommands(commands);
-        if (!properties.Items.Select(static item => item.PropertyId)
-                .SequenceEqual(["level", "amplitude"]) ||
-            commands.Items.Count != 1 ||
-            commands.Items[0].CommandId != "platform.probe.inspect")
+
+        Dictionary<string, ChartPropertyDescriptor> propertyById =
+            properties.Items.ToDictionary(
+                static item => item.PropertyId,
+                StringComparer.Ordinal);
+        if (propertyById.Count != 3 ||
+            !propertyById.TryGetValue("level", out ChartPropertyDescriptor? level) ||
+            !propertyById.TryGetValue(
+                "amplitude",
+                out ChartPropertyDescriptor? amplitude) ||
+            !propertyById.TryGetValue("stroke", out ChartPropertyDescriptor? stroke) ||
+            level.ValueKind != ChartPropertyValueKind.Decimal ||
+            level.Storage != ChartPropertyStorage.Parameters ||
+            level.ChangeImpact != ChartChangeImpact.RebuildVisuals ||
+            amplitude.ValueKind != ChartPropertyValueKind.Decimal ||
+            amplitude.Storage != ChartPropertyStorage.Parameters ||
+            amplitude.ChangeImpact != ChartChangeImpact.RebuildVisuals ||
+            amplitude.Minimum != 0.0 ||
+            stroke.ValueKind != ChartPropertyValueKind.Color ||
+            stroke.Storage != ChartPropertyStorage.Style ||
+            stroke.ChangeImpact != ChartChangeImpact.RedrawOnly)
         {
-            throw new InvalidOperationException("Platform probe metadata is incomplete.");
+            throw new InvalidOperationException(
+                "Platform probe property metadata is incomplete.");
+        }
+
+        ChartCommandPlacement requiredPlacements =
+            ChartCommandPlacement.ContextMenu |
+            ChartCommandPlacement.QuickToolbar |
+            ChartCommandPlacement.PropertyInspector;
+        if (commands.Items.Count != 1 ||
+            commands.Items[0].CommandId != "platform.probe.inspect" ||
+            (commands.Items[0].Placement & requiredPlacements) != requiredPlacements)
+        {
+            throw new InvalidOperationException(
+                "Platform probe command metadata is incomplete.");
         }
     }
 
