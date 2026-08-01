@@ -1,6 +1,6 @@
 # ChartKit C# 세션 인수인계
 
-작성 시각: 2026-08-01 12:43 KST  
+작성 시각: 2026-08-01 13:37 KST  
 저장소: `hoonoh57/ChartKit`  
 작업 브랜치: `csharp/standalone-engine`  
 Draft PR: `#3 Build standalone C# multi-symbol chart engine`  
@@ -332,7 +332,7 @@ dotnet run `
 
 ---
 
-# 7. 다음 작업 — 순서 고정
+# 7. 다음 작업 — 실데이터 순서
 
 ## P1. 다음 거래일 실제 실시간 경계
 
@@ -372,20 +372,67 @@ reconnecting → registered → receiving
 메모리·핸들·GDI 지속 관찰
 ```
 
-## 이후
+---
+
+# 8. 범용 모듈 플랫폼 — 승인 전 기능 추가 금지
+
+사용자 요구에 따라 앞으로 모든 기능을 다음 표준 경로로 연결한다.
 
 ```text
-Core Candidate 1 동결
-Range Navigator와 과거 데이터 지연 로딩
-지표·패널 plugin
-작도·전략·주문 overlay
-다중 차트
-GPU A/B
+개별 Module
+→ Registry 등록
+→ ChartProfile On/Off
+→ 표준 Contribution
+→ Scene Compiler
+→ RenderPlan
+→ 범용 Renderer
+```
+
+문서 위치:
+
+```text
+docs/chart-module-platform/README.md
+docs/chart-module-platform/architecture-constitution.md
+docs/chart-module-platform/feature-capability-matrix.md
+docs/chart-module-platform/implementation-roadmap.md
+```
+
+현재 문서 상태:
+
+```text
+Architecture Freeze Candidate 1
+```
+
+사용자 승인 전에는 신규 지표·작도·DSL·호가·시장분석 기능을 임의로 구현하지 않는다.
+
+승인 후 첫 구현 순서:
+
+```text
+1. Modules.Abstractions
+2. Scene
+3. ModuleHost/Registry
+4. ChartProfile/Persistence
+5. Composition/RenderPlan
+6. PlatformProbeModule
+7. 공용 Context Menu
+8. 공용 Property Inspector
+9. SMA Module 이전
+10. RSI → MACD → SuperTrend 이전
+```
+
+핵심 원칙:
+
+```text
+Renderer는 개별 기능을 모른다.
+Module은 SkiaSharp와 WinForms를 모른다.
+UI는 기능별 메뉴와 설정 Form을 하드코딩하지 않는다.
+컨텍스트 메뉴·퀵버튼·Property Inspector는 동일 메타데이터에서 생성한다.
+기능 On/Off는 범용 SetModuleEnabled 명령 하나를 사용한다.
 ```
 
 ---
 
-# 8. 하지 말아야 할 실수
+# 9. 하지 말아야 할 실수
 
 ```text
 틱 데이터를 시간으로 정렬
@@ -396,6 +443,9 @@ GPU A/B
 조회 실패를 휴장으로 판정
 동일 시각/가격/수량만으로 실시간 체결 중복 제거
 재연결마다 RealtimeCandleBuilder 초기화
+Renderer에 RSI/전략/호가 등 기능별 분기 추가
+MainForm에 기능별 Toggle 메서드 추가
+모듈에서 SKCanvas 직접 사용
 CI 실패 코드를 로컬 pull 대상으로 안내
 Draft PR 병합
 ```
