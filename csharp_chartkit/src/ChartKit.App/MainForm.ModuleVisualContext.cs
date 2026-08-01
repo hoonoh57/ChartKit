@@ -62,7 +62,7 @@ internal sealed partial class MainForm
         ModulePlatform.Recompose(
             snapshot.Version,
             _moduleVisualViewportVersion,
-            themeVersion: 0,
+            0,
             window.StartIndex,
             window.EndExclusive);
         _moduleRenderPlan = ModulePlatform.RenderPlan;
