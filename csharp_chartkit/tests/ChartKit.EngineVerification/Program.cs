@@ -11,6 +11,7 @@ try
     ChartCursorVerification.Run();
     ModulePlatformContractVerification.Run();
     ModuleHostVerification.Run();
+    CompositionProbeVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     MarketDataNormalizerVerification.Run();
