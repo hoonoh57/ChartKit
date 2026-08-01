@@ -275,7 +275,7 @@ public sealed record ChartPropertyDescriptor
         AllowedValues = allowedValues is null
             ? Array.Empty<string>()
             : allowedValues
-                .Select(static value => RequireText(value, nameof(allowedValues)))
+                .Select(static value => RequireText(value, "allowedValues"))
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
 
