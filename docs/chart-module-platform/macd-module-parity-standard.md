@@ -12,8 +12,11 @@ P2-3 migrates the existing legacy `MacdIndicator` into the generic chart-module 
 - EMA seed: simple average of the first full period
 - MACD: fast EMA minus slow EMA
 - Histogram: MACD minus signal
-- Panel: `indicator.4`
+- Internal panel index: 7
+- Module panel ID: `indicator.7`
 - Visuals: MACD Polyline, Signal Polyline, Histogram
+
+The visual order of the MACD pane is not its internal panel index. The legacy `MacdIndicator` descriptor uses panel index 7, so the module must target `indicator.7`.
 
 ## Module contract
 
@@ -21,9 +24,12 @@ P2-3 migrates the existing legacy `MacdIndicator` into the generic chart-module 
 - Entry point: `MacdModule.cs`
 - Runtime: `MacdSeriesRuntime.cs`
 - Primary data: ordered OHLCV snapshot
+- Default panel: `indicator.7`
 - Default enabled: false
 - Renderer dependency: none
 - UI dependency: none
+
+Profiles created by the first P2-3 draft used the incorrect placement `indicator.4`. `MacdModule.ApplyProfile` maps that exact legacy value to `indicator.7` so existing test profiles continue to render. New profiles use `indicator.7` directly.
 
 ## Incremental paths
 
@@ -43,7 +49,7 @@ Input order is preserved. The module never sorts or deduplicates bars.
 - `macd.signal`: Polyline
 - `macd.histogram`: Histogram
 
-All contributions target the profile placement and use object-specific style keys.
+All contributions target `indicator.7` after profile compatibility normalization and use object-specific style keys.
 
 ## Properties
 
@@ -65,6 +71,8 @@ Required before merge:
 - legacy full/update/append/rebuild parity;
 - disabled calculation count zero;
 - three contribution types and styles;
+- `indicator.7` panel contract;
+- incorrect legacy `indicator.4` profile compatibility migration;
 - parameter-change recalculation;
 - App registration, property projection, rendering and profile round-trip;
 - desktop overlay parity with legacy MACD;
