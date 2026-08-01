@@ -376,6 +376,23 @@ public sealed record ChartContribution
         ChartPrimitiveKind primitiveKind,
         int zIndex,
         IReadOnlyList<ChartSeriesPoint> points)
+        : this(
+            identity,
+            panelId,
+            primitiveKind,
+            zIndex,
+            points,
+            new JsonObject())
+    {
+    }
+
+    public ChartContribution(
+        ChartObjectIdentity identity,
+        string panelId,
+        ChartPrimitiveKind primitiveKind,
+        int zIndex,
+        IReadOnlyList<ChartSeriesPoint> points,
+        JsonObject style)
     {
         identity.Validate();
         Identity = identity;
@@ -387,6 +404,9 @@ public sealed record ChartContribution
         Points = points is null
             ? throw new ArgumentNullException(nameof(points))
             : points.ToArray();
+        Style = style is null
+            ? throw new ArgumentNullException(nameof(style))
+            : (JsonObject)style.DeepClone();
     }
 
     public ChartObjectIdentity Identity { get; }
@@ -394,4 +414,5 @@ public sealed record ChartContribution
     public ChartPrimitiveKind PrimitiveKind { get; }
     public int ZIndex { get; }
     public IReadOnlyList<ChartSeriesPoint> Points { get; }
+    public JsonObject Style { get; }
 }
