@@ -158,6 +158,21 @@ scripts/verify_chart_module_headers.ps1
 - `Modules.Platform`와 `Composition` 참조 경계
 - Renderer와 App UI 미변경
 
+### 7. `profile-persistence-standard.md` — P1-D 구현 표준
+
+다음을 ChartProfile 저장·복원 계약으로 고정한다.
+
+- `ChartProfile.CurrentSchemaVersion = 2`
+- timeframe·layout·interaction·theme·modules 저장
+- 동일 Profile의 결정적 JSON
+- schemaVersion 1에서 2로 마이그레이션
+- 미래 schemaVersion 명시적 거부
+- 미등록 moduleId Profile 보존
+- JsonObject와 module profile 방어 복사
+- 중복 instanceId 및 잘못된 JSON 타입 거부
+- UTF-8 BOM 없는 동일 디렉터리 임시 파일 교체
+- Persistence의 Renderer·App·ModuleHost 참조 금지
+
 ## 변경 절차
 
 Baseline 1.0 이후 다음 변경은 근거 없이 허용하지 않는다.
