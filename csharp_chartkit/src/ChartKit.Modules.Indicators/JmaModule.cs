@@ -273,8 +273,8 @@ public sealed class JmaModule :
             value,
             ChartChangeImpact.RecalculateModule,
             ChartPropertyStorage.Parameters,
-            minimum,
-            maximum);
+            minimum: minimum,
+            maximum: maximum);
 
     private static ChartPropertyDescriptor CreateColorProperty(
         string propertyId,
