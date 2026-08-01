@@ -35,6 +35,7 @@ public readonly record struct RealtimeDiagnosticsSnapshot(
     int SeedTickCount,
     DateTime? FirstRealtimeTime,
     MarketEventKind? FirstEventKind,
+    DateTime? LastRejectedStaleTime,
     long AcceptedEvents,
     long UpdateEvents,
     long AppendEvents,
@@ -52,6 +53,7 @@ public readonly record struct RealtimeDiagnosticsSnapshot(
             null,
             null,
             0,
+            null,
             null,
             null,
             0,
@@ -80,6 +82,7 @@ internal sealed class RealtimeDiagnosticsState
     private int _seedTickCount;
     private DateTime? _firstRealtimeTime;
     private MarketEventKind? _firstEventKind;
+    private DateTime? _lastRejectedStaleTime;
     private long _acceptedEvents;
     private long _updateEvents;
     private long _appendEvents;
@@ -107,6 +110,7 @@ internal sealed class RealtimeDiagnosticsState
             _seedTickCount = Math.Max(0, seedTickCount);
             _firstRealtimeTime = null;
             _firstEventKind = null;
+            _lastRejectedStaleTime = null;
             _acceptedEvents = 0;
             _updateEvents = 0;
             _appendEvents = 0;
@@ -179,9 +183,9 @@ internal sealed class RealtimeDiagnosticsState
         lock (_gate)
         {
             _rejectedStaleEvents++;
-            if (_firstRealtimeTime.HasValue) return;
-            _firstRealtimeTime = tradeTime;
-            _boundaryState = RealtimeBoundaryState.RejectedStaleBeforeFirstEvent;
+            _lastRejectedStaleTime = tradeTime;
+            if (!_firstRealtimeTime.HasValue)
+                _boundaryState = RealtimeBoundaryState.RejectedStaleBeforeFirstEvent;
         }
     }
 
@@ -199,6 +203,7 @@ internal sealed class RealtimeDiagnosticsState
                 _seedTickCount,
                 _firstRealtimeTime,
                 _firstEventKind,
+                _lastRejectedStaleTime,
                 _acceptedEvents,
                 _updateEvents,
                 _appendEvents,
