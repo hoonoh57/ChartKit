@@ -17,6 +17,7 @@ internal static class MacdModuleParityVerification
         VerifyDefinitionAndMetadata();
         VerifyFullUpdateAppendAndRebuildParity();
         VerifyDisabledZeroAndContributions();
+        VerifyLegacyPlacementMigration();
         VerifyParameterChange();
         VerifyReferenceBoundary();
 
@@ -33,6 +34,8 @@ internal static class MacdModuleParityVerification
         Console.WriteLine("csharp_macd_disabled_zero=PASS");
         Console.WriteLine("csharp_macd_contributions=PASS");
         Console.WriteLine("csharp_macd_style_override=PASS");
+        Console.WriteLine("csharp_macd_panel_contract=PASS");
+        Console.WriteLine("csharp_macd_legacy_panel_migration=PASS");
         Console.WriteLine("csharp_macd_parameter_change=PASS");
         Console.WriteLine("csharp_macd_reference_boundary=PASS");
         Console.WriteLine("csharp_macd_module_contracts=PASS");
@@ -43,7 +46,8 @@ internal static class MacdModuleParityVerification
         ChartModuleDefinition definition = MacdModule.Definition;
         if (definition.ModuleId != "indicator.macd" ||
             definition.Category != "Indicators" ||
-            definition.DefaultPanelId != "indicator.4" ||
+            definition.DefaultPanelId != MacdModule.DefaultPanelId ||
+            definition.DefaultPanelId != "indicator.7" ||
             definition.DefaultEnabled ||
             !definition.Capabilities.HasFlag(ChartModuleCapabilities.Computation) ||
             !definition.SupportedPrimitiveKinds.SequenceEqual(
@@ -157,25 +161,40 @@ internal static class MacdModuleParityVerification
 
         ChartRenderPlan plan = new ChartCompositionService(host).Compose(
             new ChartVisualContext(11, 1, 1, 100, 160));
-        if (plan.Primitives.Count != 3)
-            throw new InvalidOperationException("MACD did not emit three primitives.");
+        AssertContributionContract(plan);
+    }
 
-        RenderPrimitivePlan macd = plan.Primitives.Single(
-            static item => item.Identity.ObjectId == MacdModule.MacdObjectId);
-        RenderPrimitivePlan signal = plan.Primitives.Single(
-            static item => item.Identity.ObjectId == MacdModule.SignalObjectId);
-        RenderPrimitivePlan histogram = plan.Primitives.Single(
-            static item => item.Identity.ObjectId == MacdModule.HistogramObjectId);
-        if (macd.PrimitiveKind != ChartPrimitiveKind.Polyline ||
-            signal.PrimitiveKind != ChartPrimitiveKind.Polyline ||
-            histogram.PrimitiveKind != ChartPrimitiveKind.Histogram ||
-            macd.PanelId != "indicator.4" ||
-            macd.Style.Stroke != "#795548" ||
-            signal.Style.Stroke != "#009688" ||
-            histogram.Style.Stroke != "#FFEB3B")
+    private static void VerifyLegacyPlacementMigration()
+    {
+        var registry = new ChartModuleRegistry();
+        registry.Register<MacdModule>();
+        var host = new ChartModuleHost(registry);
+        ChartModuleOperationResult hosted = host.UpsertProfile(
+            CreateProfile(
+                "macd-legacy-placement",
+                12,
+                26,
+                9,
+                true,
+                placement: "indicator.4"));
+        if (!hosted.Succeeded)
+            throw new InvalidOperationException(hosted.Error);
+
+        List<Candle> candles = Fixture.CreateCandles(160);
+        ChartModuleDataUpdateResult updated =
+            host.ApplyPrimarySeries(ToPrimary(candles, 12));
+        if (updated.UpdatedModules != 1 || updated.FaultedModules != 0)
+            throw new InvalidOperationException(
+                "Legacy MACD profile did not consume data.");
+
+        ChartRenderPlan plan = new ChartCompositionService(host).Compose(
+            new ChartVisualContext(12, 1, 1, 100, 160));
+        if (plan.Primitives.Count != 3 ||
+            plan.Primitives.Any(static item =>
+                item.PanelId != MacdModule.DefaultPanelId))
         {
             throw new InvalidOperationException(
-                "MACD contributions or styles are incorrect.");
+                "Legacy MACD panel placement was not migrated.");
         }
     }
 
@@ -205,6 +224,32 @@ internal static class MacdModuleParityVerification
         AssertPlanParity(expected, plan);
     }
 
+    private static void AssertContributionContract(ChartRenderPlan plan)
+    {
+        if (plan.Primitives.Count != 3)
+            throw new InvalidOperationException("MACD did not emit three primitives.");
+
+        RenderPrimitivePlan macd = plan.Primitives.Single(
+            static item => item.Identity.ObjectId == MacdModule.MacdObjectId);
+        RenderPrimitivePlan signal = plan.Primitives.Single(
+            static item => item.Identity.ObjectId == MacdModule.SignalObjectId);
+        RenderPrimitivePlan histogram = plan.Primitives.Single(
+            static item => item.Identity.ObjectId == MacdModule.HistogramObjectId);
+        if (macd.PrimitiveKind != ChartPrimitiveKind.Polyline ||
+            signal.PrimitiveKind != ChartPrimitiveKind.Polyline ||
+            histogram.PrimitiveKind != ChartPrimitiveKind.Histogram ||
+            macd.PanelId != MacdModule.DefaultPanelId ||
+            signal.PanelId != MacdModule.DefaultPanelId ||
+            histogram.PanelId != MacdModule.DefaultPanelId ||
+            macd.Style.Stroke != "#795548" ||
+            signal.Style.Stroke != "#009688" ||
+            histogram.Style.Stroke != "#FFEB3B")
+        {
+            throw new InvalidOperationException(
+                "MACD contributions, panel placement, or styles are incorrect.");
+        }
+    }
+
     private static MacdModule CreateActiveModule(
         string instanceId,
         int fast,
@@ -223,7 +268,8 @@ internal static class MacdModuleParityVerification
         int fast,
         int slow,
         int signal,
-        bool enabled) =>
+        bool enabled,
+        string? placement = null) =>
         new()
         {
             ModuleId = MacdModule.Definition.ModuleId,
@@ -231,7 +277,7 @@ internal static class MacdModuleParityVerification
             ModuleSchemaVersion = MacdModule.Definition.SchemaVersion,
             IsEnabled = enabled,
             ZIndex = 10,
-            Placement = "indicator.4",
+            Placement = placement ?? MacdModule.DefaultPanelId,
             Parameters = new JsonObject
             {
                 ["fastPeriod"] = fast,
@@ -298,6 +344,7 @@ internal static class MacdModuleParityVerification
         IReadOnlyList<IndicatorPoint> expected,
         ChartRenderPlan plan)
     {
+        AssertContributionContract(plan);
         RenderPrimitivePlan macd = plan.Primitives.Single(
             static item => item.Identity.ObjectId == MacdModule.MacdObjectId);
         RenderPrimitivePlan signal = plan.Primitives.Single(
