@@ -428,12 +428,16 @@ public sealed class ChartModuleHost
             throw new ArgumentNullException(nameof(profile.Style));
         if (profile.PersistentState is null)
             throw new ArgumentNullException(nameof(profile.PersistentState));
-        if (!_registry.TryGetDefinition(moduleId, out definition) ||
-            definition is null)
+        if (!_registry.TryGetDefinition(
+                moduleId,
+                out ChartModuleDefinition? registeredDefinition) ||
+            registeredDefinition is null)
         {
             throw new InvalidOperationException(
                 $"Chart module is not registered: {moduleId}");
         }
+
+        definition = registeredDefinition;
         if (profile.ModuleSchemaVersion != definition.SchemaVersion)
         {
             throw new InvalidOperationException(
