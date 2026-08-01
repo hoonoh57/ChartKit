@@ -52,6 +52,7 @@ internal sealed class ChartModulePlatformController : IDisposable
         _registry.Register<JmaModule>();
         _registry.Register<ObvModule>();
         _registry.Register<DisparityModule>();
+        _registry.Register<VwapModule>();
         _host = new ChartModuleHost(_registry);
         _composition = new ChartCompositionService(_host);
         _uiCatalog = new ChartModuleUiCatalog(_registry, _host, _selection);
