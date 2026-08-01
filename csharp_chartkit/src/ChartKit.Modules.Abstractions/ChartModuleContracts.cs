@@ -191,12 +191,130 @@ public enum ChartChangeImpact
     RebuildWorkspace
 }
 
-public sealed record ChartPropertyDescriptor(
-    string PropertyId,
-    string DisplayName,
-    string Category,
-    object? Value,
-    ChartChangeImpact ChangeImpact);
+public enum ChartPropertyValueKind
+{
+    Boolean,
+    Integer,
+    Decimal,
+    String,
+    Enum,
+    Color,
+    LineStyle,
+    Symbol,
+    Timeframe,
+    PanelId,
+    Formula,
+    DateRange,
+    Collection
+}
+
+public enum ChartPropertyStorage
+{
+    Parameters,
+    Style,
+    PersistentState,
+    Placement,
+    ZIndex
+}
+
+public sealed record ChartPropertyDescriptor
+{
+    public ChartPropertyDescriptor(
+        string propertyId,
+        string displayName,
+        string category,
+        object? value,
+        ChartChangeImpact changeImpact)
+        : this(
+            propertyId,
+            displayName,
+            category,
+            InferValueKind(value),
+            value,
+            changeImpact,
+            ChartPropertyStorage.Parameters)
+    {
+    }
+
+    public ChartPropertyDescriptor(
+        string propertyId,
+        string displayName,
+        string category,
+        ChartPropertyValueKind valueKind,
+        object? value,
+        ChartChangeImpact changeImpact,
+        ChartPropertyStorage storage,
+        bool isReadOnly = false,
+        double? minimum = null,
+        double? maximum = null,
+        IReadOnlyList<string>? allowedValues = null)
+    {
+        PropertyId = RequireText(propertyId, nameof(propertyId));
+        DisplayName = RequireText(displayName, nameof(displayName));
+        Category = RequireText(category, nameof(category));
+        ValueKind = valueKind;
+        Value = value;
+        ChangeImpact = changeImpact;
+        Storage = storage;
+        IsReadOnly = isReadOnly;
+
+        if (minimum.HasValue && !double.IsFinite(minimum.Value))
+            throw new ArgumentOutOfRangeException(nameof(minimum));
+        if (maximum.HasValue && !double.IsFinite(maximum.Value))
+            throw new ArgumentOutOfRangeException(nameof(maximum));
+        if (minimum.HasValue && maximum.HasValue &&
+            maximum.Value < minimum.Value)
+        {
+            throw new ArgumentException(
+                "Maximum must be greater than or equal to minimum.",
+                nameof(maximum));
+        }
+
+        Minimum = minimum;
+        Maximum = maximum;
+        AllowedValues = allowedValues is null
+            ? Array.Empty<string>()
+            : allowedValues
+                .Select(static value => RequireText(value, nameof(allowedValues)))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+        if (ValueKind == ChartPropertyValueKind.Enum &&
+            AllowedValues.Count == 0)
+        {
+            throw new ArgumentException(
+                "Enum properties require at least one allowed value.",
+                nameof(allowedValues));
+        }
+    }
+
+    public string PropertyId { get; }
+    public string DisplayName { get; }
+    public string Category { get; }
+    public ChartPropertyValueKind ValueKind { get; }
+    public object? Value { get; }
+    public ChartChangeImpact ChangeImpact { get; }
+    public ChartPropertyStorage Storage { get; }
+    public bool IsReadOnly { get; }
+    public double? Minimum { get; }
+    public double? Maximum { get; }
+    public IReadOnlyList<string> AllowedValues { get; }
+
+    private static ChartPropertyValueKind InferValueKind(object? value) =>
+        value switch
+        {
+            bool => ChartPropertyValueKind.Boolean,
+            byte or sbyte or short or ushort or int or uint or long or ulong =>
+                ChartPropertyValueKind.Integer,
+            float or double or decimal => ChartPropertyValueKind.Decimal,
+            _ => ChartPropertyValueKind.String
+        };
+
+    private static string RequireText(string value, string parameterName) =>
+        string.IsNullOrWhiteSpace(value)
+            ? throw new ArgumentException("Value must not be blank.", parameterName)
+            : value.Trim();
+}
 
 public interface IChartCommandProvider
 {
