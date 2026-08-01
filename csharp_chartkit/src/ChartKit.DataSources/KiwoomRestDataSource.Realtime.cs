@@ -99,7 +99,7 @@ public sealed partial class KiwoomRestDataSource
                     .ConfigureAwait(false);
                 try
                 {
-                    using var socket = new ClientWebSocket();
+                    using IKiwoomWebSocket socket = _webSocketFactory();
                     await socket.ConnectAsync(
                         _session.Options.WebSocketUri,
                         cancellationToken).ConfigureAwait(false);
@@ -154,7 +154,7 @@ public sealed partial class KiwoomRestDataSource
     }
 
     private async Task RunRealtimeSessionAsync(
-        ClientWebSocket socket,
+        IKiwoomWebSocket socket,
         string token,
         string[] symbols,
         Dictionary<string, RealtimeCandleBuilder> builders,
@@ -264,7 +264,7 @@ public sealed partial class KiwoomRestDataSource
     }
 
     private static async Task SendRegistrationAsync(
-        ClientWebSocket socket,
+        IKiwoomWebSocket socket,
         string[] symbols,
         CancellationToken cancellationToken)
     {
@@ -306,13 +306,13 @@ public sealed partial class KiwoomRestDataSource
     }
 
     private static Task SendJsonAsync(
-        ClientWebSocket socket,
+        IKiwoomWebSocket socket,
         object payload,
         CancellationToken cancellationToken) =>
         SendTextAsync(socket, JsonSerializer.Serialize(payload), cancellationToken);
 
     private static async Task SendTextAsync(
-        ClientWebSocket socket,
+        IKiwoomWebSocket socket,
         string text,
         CancellationToken cancellationToken)
     {
@@ -325,7 +325,7 @@ public sealed partial class KiwoomRestDataSource
     }
 
     private static async Task<string?> ReceiveTextAsync(
-        ClientWebSocket socket,
+        IKiwoomWebSocket socket,
         CancellationToken cancellationToken)
     {
         byte[] buffer = ArrayPool<byte>.Shared.Rent(8192);
