@@ -1,6 +1,9 @@
+using System.Text.Json.Nodes;
 using ChartKit.CSharp.Contracts;
 using ChartKit.CSharp.DataSources;
 using ChartKit.CSharp.Engine;
+using ChartKit.CSharp.Modules.Abstractions;
+using ChartKit.CSharp.UiModel;
 
 namespace ChartKit.CSharp.App;
 
@@ -101,10 +104,145 @@ internal static class ConsoleModes
                     $"Self-test snapshot failed for {symbol}.");
         }
 
+        await RunModulePlatformSelfTestAsync(options.Timeframe);
+
         EngineMetrics metrics = engine.GetMetrics();
         Console.WriteLine($"self_test_symbols={options.Symbols.Length}");
         Console.WriteLine($"self_test_processed={metrics.ProcessedEvents}");
         Console.WriteLine("csharp_app_self_test=PASS");
         return 0;
+    }
+
+    private static async Task RunModulePlatformSelfTestAsync(
+        CandleTimeframe timeframe)
+    {
+        string directory = Path.Combine(
+            Path.GetTempPath(),
+            "chartkit-app-module-self-test-" + Guid.NewGuid().ToString("N"));
+        string profilePath = Path.Combine(directory, "chart-profile.json");
+
+        try
+        {
+            using (var controller = new ChartModulePlatformController(profilePath))
+            {
+                await controller.InitializeAsync(timeframe.ToString());
+                ChartUiCatalogSnapshot initial = controller.BuildUiCatalog();
+                ChartUiCommandItem toggle = initial.ContextMenuItems.Single(
+                    static item => item.Kind == ChartUiCommandKind.ModuleToggle);
+                ChartUiCommandItem inspect = initial.QuickToolbarItems.Single(
+                    static item => item.Kind == ChartUiCommandKind.ModuleCommand);
+
+                if (initial.ContextMenuItems.Count < 2 ||
+                    !initial.ContextMenuItems.Contains(toggle))
+                {
+                    throw new InvalidOperationException(
+                        "App module context-menu projection failed.");
+                }
+                if (initial.QuickToolbarItems.Count < 2 ||
+                    !initial.QuickToolbarItems.Contains(inspect))
+                {
+                    throw new InvalidOperationException(
+                        "App module quick-toolbar projection failed.");
+                }
+
+                ChartModulePlatformActionResult enabled =
+                    await controller.ExecuteCommandAsync(toggle);
+                if (!enabled.Succeeded || !enabled.Changed)
+                    throw new InvalidOperationException("App module toggle failed.");
+
+                ChartModulePlatformActionResult selected =
+                    await controller.ExecuteCommandAsync(inspect);
+                if (!selected.Succeeded || !selected.Changed)
+                    throw new InvalidOperationException("App module selection failed.");
+
+                ChartUiCatalogSnapshot selectedCatalog =
+                    controller.BuildUiCatalog();
+                if (selectedCatalog.InspectorProperties.Count != 3 ||
+                    !selectedCatalog.InspectorProperties
+                        .Select(static item => item.Descriptor.PropertyId)
+                        .SequenceEqual(["amplitude", "level", "stroke"]))
+                {
+                    throw new InvalidOperationException(
+                        "App module property-inspector projection failed.");
+                }
+
+                ChartPropertyChangeResult changed =
+                    await controller.ChangePropertyAsync(
+                        toggle.Owner.InstanceId,
+                        "level",
+                        JsonValue.Create(73d));
+                if (!changed.Succeeded ||
+                    !changed.Changed ||
+                    changed.ChangeImpact != ChartChangeImpact.RebuildVisuals)
+                {
+                    throw new InvalidOperationException(
+                        "App module property mutation failed.");
+                }
+
+                if (controller.RenderPlan.Primitives.Count != 1 ||
+                    controller.RenderPlan.Primitives[0].Points[0].Y != 73d)
+                {
+                    throw new InvalidOperationException(
+                        "App module render-plan recomposition failed.");
+                }
+
+                await controller.UpdateShellProfileAsync(
+                    timeframe.ToString(),
+                    new JsonObject
+                    {
+                        ["visibleBars"] = 120,
+                        ["infoPanelVisible"] = true
+                    },
+                    new JsonObject
+                    {
+                        ["datesVisible"] = true,
+                        ["axesVisible"] = true,
+                        ["legendVisible"] = true,
+                        ["crosshairVisible"] = true
+                    },
+                    new JsonObject());
+            }
+
+            using (var restored = new ChartModulePlatformController(profilePath))
+            {
+                await restored.InitializeAsync(timeframe.ToString());
+                ChartUiCatalogSnapshot restoredCatalog =
+                    restored.BuildUiCatalog();
+                ChartUiCommandItem restoredToggle =
+                    restoredCatalog.ContextMenuItems.Single(
+                        static item => item.Kind ==
+                            ChartUiCommandKind.ModuleToggle);
+                if (!restoredToggle.IsChecked)
+                    throw new InvalidOperationException(
+                        "App module enabled state was not restored.");
+
+                restored.Select(restoredToggle.Owner);
+                ChartUiPropertyItem restoredLevel = restored
+                    .BuildUiCatalog()
+                    .InspectorProperties
+                    .Single(static item =>
+                        item.Descriptor.PropertyId == "level");
+                if (Convert.ToDouble(restoredLevel.Descriptor.Value) != 73d ||
+                    restored.Profile.Layout["visibleBars"]?.GetValue<int>() != 120 ||
+                    restored.RenderPlan.Primitives.Count != 1 ||
+                    restored.RenderPlan.Primitives[0].Points[0].Y != 73d)
+                {
+                    throw new InvalidOperationException(
+                        "App module profile round-trip failed.");
+                }
+            }
+
+            Console.WriteLine("csharp_app_module_profile_load=PASS");
+            Console.WriteLine("csharp_app_module_context_menu=PASS");
+            Console.WriteLine("csharp_app_module_quick_toolbar=PASS");
+            Console.WriteLine("csharp_app_module_property_inspector=PASS");
+            Console.WriteLine("csharp_app_module_property_roundtrip=PASS");
+            Console.WriteLine("csharp_app_module_render_plan=PASS");
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
     }
 }
