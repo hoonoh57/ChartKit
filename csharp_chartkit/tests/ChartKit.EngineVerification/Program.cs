@@ -16,6 +16,7 @@ try
     await ReplayDataVerification.RunAsync();
     await KiwoomSessionVerification.RunAsync();
     await KiwoomHistoryVerification.RunAsync();
+    await KiwoomTickSourceOrderVerification.RunAsync();
     RealtimeBuilderVerification.Run();
     Console.WriteLine("csharp_engine_verification=PASS");
     return 0;
