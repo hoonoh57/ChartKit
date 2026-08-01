@@ -9,6 +9,7 @@ try
     PriceGridVerification.Run();
     ChartPanelAxisVerification.Run();
     ChartCursorVerification.Run();
+    ModulePlatformContractVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     MarketDataNormalizerVerification.Run();
