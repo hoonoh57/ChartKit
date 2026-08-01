@@ -1,6 +1,7 @@
 using System.Globalization;
 using ChartKit.CSharp.Charting;
 using ChartKit.CSharp.Contracts;
+using ChartKit.CSharp.DataSources;
 
 namespace ChartKit.CSharp.App;
 
@@ -294,6 +295,8 @@ internal sealed partial class MainForm
         AddInfoRow("저가", "Low");
         AddInfoRow("종가", "Close");
         AddInfoRow("거래량", "Volume");
+        AddInfoRow("실시간", "Realtime");
+        AddInfoRow("경계", "Boundary");
         AddInfoRow("상태", "Connection");
     }
 
@@ -327,6 +330,7 @@ internal sealed partial class MainForm
         EngineMetrics metrics)
     {
         string name = _selectedMetadata?.DisplayName ?? _selectedSymbol;
+        RealtimeDiagnosticsSnapshot realtime = GetRealtimeDiagnostics();
         _symbolNameLabel.Text = name;
         _countLabel.Text = snapshot is null
             ? "표시 0 / 총 0"
@@ -335,15 +339,19 @@ internal sealed partial class MainForm
             $"{_source.Name} | {_workspace.Timeframe} | " +
             $"gap {window.RightBlankBars:N0} offset {_viewport.RightOffsetBars:N0} | " +
             $"events {metrics.ProcessedEvents:N0} queue {metrics.MaxQueueDepth:N0} | " +
+            $"ws {FormatConnectionState(realtime.ConnectionState)} " +
+            $"boundary {FormatBoundaryState(realtime.BoundaryState)} " +
+            $"stale {realtime.RejectedStaleEvents:N0} | " +
             $"latency {metrics.LastLatencyMicroseconds:N0}us";
         Text = $"ChartKit C# - {_selectedSymbol} {name} [{_workspace.Timeframe}]";
-        UpdateInfoPanel(snapshot, window, metrics);
+        UpdateInfoPanel(snapshot, window, metrics, realtime);
     }
 
     private void UpdateInfoPanel(
         SymbolSnapshot? snapshot,
         ChartWindow window,
-        EngineMetrics metrics)
+        EngineMetrics metrics,
+        RealtimeDiagnosticsSnapshot realtime)
     {
         SetInfoValue("Code", _selectedSymbol);
         SetInfoValue("Name", _selectedMetadata?.DisplayName ?? _selectedSymbol);
@@ -353,6 +361,8 @@ internal sealed partial class MainForm
         SetInfoValue(
             "Counts",
             snapshot is null ? "0 / 0" : $"{window.Count:N0} / {snapshot.Candles.Length:N0}");
+        SetInfoValue("Realtime", FormatRealtimeSummary(realtime));
+        SetInfoValue("Boundary", FormatBoundarySummary(realtime));
         SetInfoValue(
             "Connection",
             $"events {metrics.ProcessedEvents:N0}, errors {metrics.ProcessingErrors:N0}");
@@ -375,6 +385,62 @@ internal sealed partial class MainForm
         SetInfoValue("Close", FormatInfoNumber(candle.Close));
         SetInfoValue("Volume", candle.Volume.ToString("N0", CultureInfo.InvariantCulture));
     }
+
+    private RealtimeDiagnosticsSnapshot GetRealtimeDiagnostics() =>
+        _source is IRealtimeDiagnosticsSource diagnosticsSource
+            ? diagnosticsSource.GetRealtimeDiagnostics(_selectedSymbol)
+            : RealtimeDiagnosticsSnapshot.Empty(_selectedSymbol);
+
+    private static string FormatRealtimeSummary(
+        RealtimeDiagnosticsSnapshot realtime)
+    {
+        string state = FormatConnectionState(realtime.ConnectionState);
+        string events =
+            $"U {realtime.UpdateEvents:N0} / A {realtime.AppendEvents:N0}";
+        string attempts =
+            $"try {realtime.ConnectionAttempts:N0} / reg {realtime.RegistrationCount:N0}";
+        return $"{state}, {events}, {attempts}";
+    }
+
+    private static string FormatBoundarySummary(
+        RealtimeDiagnosticsSnapshot realtime)
+    {
+        string boundary = FormatBoundaryState(realtime.BoundaryState);
+        string seed = realtime.SeedCloseTime.HasValue
+            ? $"seed {realtime.SeedCloseTime.Value:MM-dd HH:mm:ss}"
+            : "seed -";
+        string first = realtime.FirstRealtimeTime.HasValue
+            ? $"first {realtime.FirstRealtimeTime.Value:MM-dd HH:mm:ss}"
+            : "first -";
+        return $"{boundary}, {seed}, {first}, stale {realtime.RejectedStaleEvents:N0}";
+    }
+
+    private static string FormatConnectionState(RealtimeConnectionState state) =>
+        state switch
+        {
+            RealtimeConnectionState.Idle => "idle",
+            RealtimeConnectionState.Connecting => "connecting",
+            RealtimeConnectionState.Connected => "connected",
+            RealtimeConnectionState.LoggedIn => "login",
+            RealtimeConnectionState.Registered => "registered",
+            RealtimeConnectionState.Receiving => "receiving",
+            RealtimeConnectionState.Reconnecting => "reconnecting",
+            RealtimeConnectionState.Faulted => "faulted",
+            RealtimeConnectionState.Stopped => "stopped",
+            _ => state.ToString()
+        };
+
+    private static string FormatBoundaryState(RealtimeBoundaryState state) =>
+        state switch
+        {
+            RealtimeBoundaryState.None => "none",
+            RealtimeBoundaryState.AwaitingFirstEvent => "waiting",
+            RealtimeBoundaryState.SeedUpdated => "seed-update",
+            RealtimeBoundaryState.SeedAppended => "seed-append",
+            RealtimeBoundaryState.UnseededAppended => "no-seed-append",
+            RealtimeBoundaryState.RejectedStaleBeforeFirstEvent => "stale-before-first",
+            _ => state.ToString()
+        };
 
     private void SetInfoValue(string key, string value)
     {
