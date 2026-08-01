@@ -22,15 +22,30 @@ public sealed class ChartCompositionService
     {
         IReadOnlyList<ChartHostedContributionSet> hostedSets =
             _moduleHost.CollectVisualContributions(context);
+        IReadOnlyList<ChartModuleRuntimeSnapshot> snapshots =
+            _moduleHost.GetSnapshots();
+        var profilesByInstance = snapshots.ToDictionary(
+            static snapshot => snapshot.InstanceId,
+            static snapshot => snapshot.Profile,
+            StringComparer.Ordinal);
 
         var sceneSets = new ModuleContributionSet[hostedSets.Count];
         for (int index = 0; index < hostedSets.Count; index++)
         {
             ChartHostedContributionSet hosted = hostedSets[index];
+            if (!profilesByInstance.TryGetValue(
+                    hosted.InstanceId,
+                    out ChartModuleProfile? profile))
+            {
+                throw new InvalidOperationException(
+                    $"Hosted module profile is missing: {hosted.InstanceId}");
+            }
+
             sceneSets[index] = new ModuleContributionSet(
                 hosted.ModuleId,
                 hosted.InstanceId,
                 true,
+                profile.Style,
                 hosted.Contributions);
         }
 
