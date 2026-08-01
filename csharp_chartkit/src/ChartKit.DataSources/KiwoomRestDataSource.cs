@@ -5,12 +5,15 @@ namespace ChartKit.CSharp.DataSources;
 
 public sealed partial class KiwoomRestDataSource :
     IMarketDataSource,
-    IInstrumentMetadataSource
+    IInstrumentMetadataSource,
+    IRealtimeDiagnosticsSource
 {
     private readonly KiwoomApiSession _session;
     private readonly bool _ownsSession;
     private readonly ConcurrentDictionary<string, RealtimeSeed> _realtimeSeeds =
         new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, RealtimeDiagnosticsState>
+        _realtimeDiagnostics = new(StringComparer.Ordinal);
     private int _disposed;
 
     public KiwoomRestDataSource(
@@ -33,11 +36,54 @@ public sealed partial class KiwoomRestDataSource :
         ? "Kiwoom CSharp REST mock"
         : "Kiwoom CSharp REST real";
 
+    public RealtimeDiagnosticsSnapshot GetRealtimeDiagnostics(string symbol)
+    {
+        string normalized = string.IsNullOrWhiteSpace(symbol)
+            ? string.Empty
+            : symbol.Trim();
+        return normalized.Length > 0 &&
+               _realtimeDiagnostics.TryGetValue(
+                   normalized,
+                   out RealtimeDiagnosticsState? state)
+            ? state.Snapshot()
+            : RealtimeDiagnosticsSnapshot.Empty(normalized);
+    }
+
     private void SaveSeed(string symbol, Candle candle, int tickCount) =>
         _realtimeSeeds[symbol] = new RealtimeSeed(candle, Math.Max(0, tickCount));
 
     private bool TryGetSeed(string symbol, out RealtimeSeed seed) =>
         _realtimeSeeds.TryGetValue(symbol, out seed);
+
+    private RealtimeDiagnosticsState ResetRealtimeDiagnostics(
+        string symbol,
+        CandleTimeframe timeframe,
+        Candle? seed,
+        int seedTickCount)
+    {
+        RealtimeDiagnosticsState state = _realtimeDiagnostics.GetOrAdd(
+            symbol,
+            static _ => new RealtimeDiagnosticsState());
+        state.Reset(symbol, timeframe, seed, seedTickCount);
+        return state;
+    }
+
+    private bool TryGetRealtimeDiagnosticsState(
+        string symbol,
+        out RealtimeDiagnosticsState? state) =>
+        _realtimeDiagnostics.TryGetValue(symbol, out state);
+
+    private void SetRealtimeConnectionState(
+        IReadOnlyList<string> symbols,
+        RealtimeConnectionState state,
+        string? error = null)
+    {
+        foreach (string symbol in symbols)
+        {
+            if (TryGetRealtimeDiagnosticsState(symbol, out RealtimeDiagnosticsState? diagnostics))
+                diagnostics.SetConnectionState(state, error);
+        }
+    }
 
     private void ThrowIfDisposed()
     {
