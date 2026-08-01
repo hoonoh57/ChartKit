@@ -73,7 +73,7 @@ internal sealed partial class MainForm
             {
                 await ReloadAsync(profileTimeframe);
             }
-            else if (TryGetSelectedSnapshot(out Engine.SymbolSnapshot? snapshot))
+            else if (TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
             {
                 _viewport.SetVisibleBars(
                     _workspace.RequestedVisibleBars,
@@ -647,7 +647,7 @@ internal sealed partial class MainForm
     private void RefreshModulePlanForCurrentSnapshot()
     {
         if (!_modulePlatformReady ||
-            !TryGetSelectedSnapshot(out Engine.SymbolSnapshot? snapshot) ||
+            !TryGetSelectedSnapshot(out SymbolSnapshot? snapshot) ||
             snapshot.Version == _modulePlanDataVersion)
         {
             return;
