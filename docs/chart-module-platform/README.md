@@ -71,6 +71,35 @@ Renderer는 RSI, 전략, 호가, 피보나치, 비교종목 등의 업무 기능
 - 성능 게이트와 복원 체크포인트
 - Renderer 수정이 허용되는 예외
 
+### 4. `module-file-standard.md` — 필수
+
+모든 신규 `*Module.cs` 파일의 생성 및 연결 표준이다.
+
+- 기능 단위와 프로젝트 단위 구분
+- 파일명과 기능 폴더 규칙
+- 파일 상단 `<chart-module>` 연결 계약
+- ModuleDefinition
+- Registry 등록
+- 데이터 요구사항
+- capability 인터페이스
+- Contribution → SceneCompiler → RenderPlan → Renderer 연결
+- 컨텍스트 메뉴·퀵버튼·Property Inspector 연결
+- Profile·종목 상태 저장
+- 독립 Verification
+- CI 강제 규칙
+
+신규 기능을 만들 때 다음 템플릿을 복사한다.
+
+```text
+docs/chart-module-platform/templates/ChartModule.template.cs
+```
+
+파일 상단 연결 계약을 생략하거나 임의 형식으로 작성하지 않는다. 다음 스크립트가 모든 기능군 프로젝트의 `*Module.cs`를 검사한다.
+
+```text
+scripts/verify_chart_module_headers.ps1
+```
+
 ## 승인 및 변경 절차
 
 현재 상태는 `Architecture Freeze Candidate 1`이다.
@@ -91,6 +120,8 @@ Status: Architecture Freeze Candidate 1
 - `ChartFrameBuilder`에 기능 이름별 분기 추가
 - `DefaultIndicatorFactory` 방식의 중앙 고정 등록 확대
 - 특정 기능 하나만을 위한 Renderer API 추가
+- `<Feature>Module.cs` 상단 연결 계약 생략
+- 플랫폼 연결 코드를 Calculator·Settings·MainForm 등에 분산
 
 공통 Primitive나 Capability가 부족한 경우 먼저 두 개 이상의 기능에서 재사용 가능한 범용 계약인지 검토한다.
 
@@ -99,7 +130,10 @@ Status: Architecture Freeze Candidate 1
 신규 모듈은 다음을 모두 만족해야 완료다.
 
 ```text
-[ ] 독립 Module 클래스
+[ ] Feature Capability Matrix ID
+[ ] 독립 <Feature>Module.cs 진입 파일
+[ ] 파일 상단 <chart-module> 연결 계약
+[ ] ModuleDefinition과 헤더 값 일치
 [ ] 독립 설정 모델
 [ ] Property Schema
 [ ] Command Descriptor
@@ -113,6 +147,7 @@ Status: Architecture Freeze Candidate 1
 [ ] 비활성 상태 계산 0
 [ ] 성능 기준 통과
 [ ] 오류가 다른 모듈과 차트를 중단시키지 않음
+[ ] verify_chart_module_headers.ps1 통과
 ```
 
 ## 현재 코드와의 관계
