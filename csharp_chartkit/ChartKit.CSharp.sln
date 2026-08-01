@@ -24,6 +24,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChartKit.Composition", "src
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChartKit.Persistence", "src\ChartKit.Persistence\ChartKit.Persistence.csproj", "{F2B0E9A1-7D58-4B6D-A120-4C8E6F9D3A71}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChartKit.UiModel", "src\ChartKit.UiModel\ChartKit.UiModel.csproj", "{C4D7A9B2-2E35-4F81-9D6A-7B5E2C1F8043}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChartKit.App", "src\ChartKit.App\ChartKit.App.csproj", "{8570E896-6A58-4C18-9DAB-389DD7E3D733}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChartKit.EngineVerification", "tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj", "{6A52E514-7686-477D-9985-559BAE438B8F}"
@@ -78,6 +80,10 @@ Global
 		{F2B0E9A1-7D58-4B6D-A120-4C8E6F9D3A71}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F2B0E9A1-7D58-4B6D-A120-4C8E6F9D3A71}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F2B0E9A1-7D58-4B6D-A120-4C8E6F9D3A71}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C4D7A9B2-2E35-4F81-9D6A-7B5E2C1F8043}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4D7A9B2-2E35-4F81-9D6A-7B5E2C1F8043}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4D7A9B2-2E35-4F81-9D6A-7B5E2C1F8043}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4D7A9B2-2E35-4F81-9D6A-7B5E2C1F8043}.Release|Any CPU.Build.0 = Release|Any CPU
 		{8570E896-6A58-4C18-9DAB-389DD7E3D733}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{8570E896-6A58-4C18-9DAB-389DD7E3D733}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8570E896-6A58-4C18-9DAB-389DD7E3D733}.Release|Any CPU.ActiveCfg = Release|Any CPU
