@@ -11,5 +11,6 @@
     <ProjectReference Include="..\..\src\ChartKit.DataSources\ChartKit.DataSources.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Modules.Abstractions\ChartKit.Modules.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\ChartKit.Scene\ChartKit.Scene.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.ModuleHost\ChartKit.ModuleHost.csproj" />
   </ItemGroup>
 </Project>
