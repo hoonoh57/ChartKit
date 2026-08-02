@@ -14,7 +14,7 @@ internal static class Program
             return options.Mode switch
             {
                 ApplicationMode.KiwoomProbe =>
-                    ConsoleModes.RunProbeAsync(options).GetAwaiter().GetResult(),
+                    RealtimeValidationProbe.RunAsync(options).GetAwaiter().GetResult(),
                 ApplicationMode.SelfTest =>
                     AppSelfTestRunner.RunAsync(options).GetAwaiter().GetResult(),
                 _ => RunDesktop(options)
