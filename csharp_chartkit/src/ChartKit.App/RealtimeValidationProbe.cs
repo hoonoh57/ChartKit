@@ -10,6 +10,8 @@ internal static class RealtimeValidationProbe
 
     public static async Task<int> RunAsync(AppOptions options)
     {
+        ValidateSymbols(options.Symbols);
+
         await using var source = new KiwoomRestDataSource();
         var eventCounts = new Dictionary<string, long>(StringComparer.Ordinal);
 
@@ -19,6 +21,7 @@ internal static class RealtimeValidationProbe
         Console.WriteLine($"history_count={options.HistoryCount}");
         Console.WriteLine($"realtime_seconds={options.RealtimeProbeSeconds}");
         Console.WriteLine($"symbol_count={options.Symbols.Length}");
+        Console.WriteLine($"symbols={string.Join(',', options.Symbols)}");
 
         foreach (string symbol in options.Symbols)
         {
@@ -148,6 +151,20 @@ internal static class RealtimeValidationProbe
 
         Console.WriteLine("kiwoom_realtime_validation_probe=PASS");
         return 0;
+    }
+
+    private static void ValidateSymbols(IReadOnlyList<string> symbols)
+    {
+        foreach (string symbol in symbols)
+        {
+            if (symbol.Length == 6 || !symbol.All(char.IsDigit))
+                continue;
+
+            throw new ArgumentException(
+                $"Invalid KRX symbol '{symbol}'. KRX stock codes must retain all six digits. " +
+                "In PowerShell, quote the symbols, for example: " +
+                "--symbols \"005930,000660\" or -Symbols '005930','000660'.");
+        }
     }
 
     private static string FormatTime(DateTime? value) =>
