@@ -28,3 +28,5 @@ The renderer now:
 3. App self-test;
 4. desktop replay restart with `--symbols S001,S002 --timeframe 1m --count 1323`;
 5. confirm VWAP profile restoration and `faults 0` after restart.
+
+The VWAP parity PR must remain Draft until the desktop restart reproducer completes without a native crash.
