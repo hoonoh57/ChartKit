@@ -82,7 +82,7 @@ internal sealed partial class MainForm
         {
             try
             {
-                BeginInvoke(RefreshDataRequestStatus);
+                BeginInvoke((Action)RefreshDataRequestStatus);
             }
             catch (InvalidOperationException)
             {
