@@ -39,6 +39,32 @@ internal static class RenderingVerification
             renderer.Render(canvas, snapshot, frame, options);
         canvas.Flush();
 
+        Exception? reentryFailure = null;
+        Parallel.For(
+            0,
+            128,
+            _ =>
+            {
+                try
+                {
+                    renderer.Render(canvas, snapshot, frame, options);
+                }
+                catch (Exception exception)
+                {
+                    Interlocked.CompareExchange(
+                        ref reentryFailure,
+                        exception,
+                        null);
+                }
+            });
+        canvas.Flush();
+        if (reentryFailure is not null)
+        {
+            throw new InvalidOperationException(
+                "Renderer reentry guard failed.",
+                reentryFailure);
+        }
+
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
@@ -126,6 +152,7 @@ internal static class RenderingVerification
             throw new InvalidOperationException(
                 $"Rendered image contained too few chart pixels: {changedSamples}.");
 
+        Console.WriteLine("csharp_rendering_reentry_guard=PASS");
         Console.WriteLine($"render_allocated_bytes={allocated}");
         Console.WriteLine($"legend_allocated_bytes={legendAllocated}");
         Console.WriteLine($"crosshair_allocated_bytes={crosshairAllocated}");
