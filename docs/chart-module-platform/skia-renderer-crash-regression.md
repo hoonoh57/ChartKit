@@ -32,3 +32,5 @@ The renderer now:
 The VWAP parity PR must remain Draft until the desktop restart reproducer completes without a native crash.
 
 Incident branch head must be verified exactly before Ready/merge.
+
+CI trigger note: this head includes the renderer crash guard and its parallel re-entry regression test.
