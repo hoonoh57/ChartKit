@@ -12,6 +12,7 @@ internal static class DataRequestSchedulerVerification
             TaskCreationOptions.RunContinuationsAsynchronously);
         int concurrent = 0;
         int maxConcurrent = 0;
+        bool firstCancelled = false;
         bool secondExecuted = false;
         bool thirdExecuted = false;
 
@@ -25,6 +26,11 @@ internal static class DataRequestSchedulerVerification
                 try
                 {
                     await releaseFirst.Task.WaitAsync(cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    firstCancelled = true;
+                    throw;
                 }
                 finally
                 {
@@ -61,9 +67,18 @@ internal static class DataRequestSchedulerVerification
         if (await second != DataRequestOutcome.Coalesced || secondExecuted)
             throw new InvalidOperationException(
                 "The replaced waiting request was not coalesced.");
+        if (firstCancelled)
+            throw new InvalidOperationException(
+                "Queuing another request cancelled the running request.");
+
+        await Task.Delay(25);
+        DataRequestSchedulerSnapshot measuredWait = scheduler.GetSnapshot();
+        if (measuredWait.PendingWaitMilliseconds <= 0)
+            throw new InvalidOperationException(
+                "The scheduler did not measure pending wait time.");
 
         releaseFirst.TrySetResult();
-        if (await first != DataRequestOutcome.Completed)
+        if (await first != DataRequestOutcome.Completed || firstCancelled)
             throw new InvalidOperationException(
                 "The running request did not complete normally.");
         if (await third != DataRequestOutcome.Completed || !thirdExecuted)
@@ -77,7 +92,7 @@ internal static class DataRequestSchedulerVerification
         if (completed.TotalEnqueued != 3 ||
             completed.TotalCompleted != 2 ||
             completed.TotalCoalesced != 1 ||
-            completed.MaxPendingWaitMilliseconds < 0)
+            completed.MaxPendingWaitMilliseconds <= 0)
             throw new InvalidOperationException(
                 "Data request wait metrics are inconsistent.");
 
