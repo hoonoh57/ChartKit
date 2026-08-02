@@ -101,9 +101,11 @@ internal sealed partial class MainForm
 
     private void RefreshDataRequestStatus()
     {
-        if (IsDisposed || _dataRequestScheduler is null) return;
-        DataRequestSchedulerSnapshot snapshot =
-            _dataRequestScheduler.GetSnapshot();
+        if (IsDisposed) return;
+        DataRequestScheduler? scheduler = _dataRequestScheduler;
+        if (scheduler is null) return;
+
+        DataRequestSchedulerSnapshot snapshot = scheduler.GetSnapshot();
 
         _reloadDataButton.Enabled = !_stop.IsCancellationRequested;
         if (snapshot.IsRunning)
