@@ -3,6 +3,20 @@
 This runbook defines the remaining acceptance evidence for PR #3.
 Scripted fixtures and simulated reconnects do not satisfy these gates.
 
+## PowerShell symbol argument rule
+
+KRX stock codes must remain six-character strings. PowerShell removes leading zeros when an unquoted value such as `005930,000660` is parsed as a numeric array.
+
+Use one of these quoted forms:
+
+```powershell
+# Direct dotnet command
+--symbols "005930,000660"
+
+# PowerShell validation script
+-Symbols '005930','000660'
+```
+
 ## Preconditions
 
 - Run during an active KRX market session.
@@ -16,7 +30,7 @@ Scripted fixtures and simulated reconnects do not satisfy these gates.
 ```powershell
 .\scripts\run_kiwoom_realtime_validation.ps1 `
   -Mode Baseline `
-  -Symbols 005930,000660 `
+  -Symbols '005930','000660' `
   -DurationSeconds 180 `
   -Timeframe 1m `
   -HistoryCount 240
@@ -40,7 +54,7 @@ The first accepted WebSocket event must continue from the REST history seed with
 ```powershell
 .\scripts\run_kiwoom_realtime_validation.ps1 `
   -Mode Reconnect `
-  -Symbols 005930,000660 `
+  -Symbols '005930','000660' `
   -DurationSeconds 600 `
   -Timeframe 1m `
   -HistoryCount 240 `
@@ -77,7 +91,7 @@ Disallowed substitutes:
 ```powershell
 .\scripts\run_kiwoom_realtime_validation.ps1 `
   -Mode Soak `
-  -Symbols 005930,000660 `
+  -Symbols '005930','000660' `
   -DurationSeconds 3600 `
   -Timeframe 1m `
   -HistoryCount 240 `
