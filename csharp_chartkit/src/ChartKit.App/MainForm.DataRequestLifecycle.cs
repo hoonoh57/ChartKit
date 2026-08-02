@@ -9,6 +9,10 @@ internal sealed partial class MainForm
         Padding = new Padding(8, 0, 4, 0),
         Visible = false
     };
+    private readonly System.Windows.Forms.Timer _dataRequestStatusTimer = new()
+    {
+        Interval = 100
+    };
     private DataRequestScheduler? _dataRequestScheduler;
     private bool _dataRequestLifecycleInstalled;
 
@@ -20,7 +24,8 @@ internal sealed partial class MainForm
         _dataRequestScheduler = new DataRequestScheduler(_stop.Token);
         _dataRequestScheduler.StateChanged += OnDataRequestSchedulerStateChanged;
         _statusStrip.Items.Add(_dataRequestStatusLabel);
-        _frameTimer.Tick += (_, _) => RefreshDataRequestStatus();
+        _dataRequestStatusTimer.Tick += (_, _) => RefreshDataRequestStatus();
+        _dataRequestStatusTimer.Start();
 
         Shown -= OnShown;
         Shown += OnDataControlsShown;
@@ -40,6 +45,8 @@ internal sealed partial class MainForm
         object? sender,
         FormClosingEventArgs e)
     {
+        _dataRequestStatusTimer.Stop();
+        _dataRequestStatusTimer.Dispose();
         _streamStop?.Cancel();
         if (_dataRequestScheduler is not null)
         {
