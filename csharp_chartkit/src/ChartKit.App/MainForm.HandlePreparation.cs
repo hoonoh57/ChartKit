@@ -9,6 +9,7 @@ internal sealed partial class MainForm
                 "Desktop controls must be prepared before the form handle is created.");
 
         InitializeDataControls();
+        InstallDataRequestLifecycle();
         ApplyToolbarStyle();
     }
 }
