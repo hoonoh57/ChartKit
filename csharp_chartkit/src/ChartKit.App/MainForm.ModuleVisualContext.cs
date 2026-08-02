@@ -14,9 +14,8 @@ internal sealed partial class MainForm
     private int _moduleVisibleEndExclusive = -1;
     private long _moduleVisualViewportVersion;
 
-    protected override void OnHandleCreated(EventArgs e)
+    private void InitializeModuleVisualContextForHandle()
     {
-        base.OnHandleCreated(e);
         if (_moduleVisualContextHooked) return;
         _frameTimer.Tick += OnModuleVisualContextFrame;
         _moduleVisualContextHooked = true;
