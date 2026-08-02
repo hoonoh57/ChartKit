@@ -277,29 +277,37 @@ internal sealed partial class MainForm
     {
         string symbol = NormalizeSymbol(text);
         bool added = AddActiveSymbol(symbol);
+        using LatestRequestCoordinator.RequestLease request =
+            BeginDataRequest(cancelStream: added);
+
         _selectedSymbol = symbol;
         _selectedMetadata = null;
         _lastVersion = -1;
         _cursor.Clear();
         SynchronizeDataControls();
 
-        if (!added && TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
+        if (!added &&
+            !request.ReplacedCurrent &&
+            TryGetSelectedSnapshot(out SymbolSnapshot? snapshot))
         {
+            request.ThrowIfSuperseded();
             _viewport.Reset(snapshot.Candles.Length);
             _viewport.SetVisibleBars(
                 _workspace.RequestedVisibleBars,
                 snapshot.Candles.Length,
                 followLatest: true);
-            await RefreshSelectedMetadataAsync();
+            await RefreshMetadataForSymbolAsync(symbol, request.Token);
+            request.ThrowIfSuperseded();
             _chart.Focus();
             _chart.Invalidate();
             return;
         }
 
-        await ReloadActiveSymbolsAsync(
+        await ReloadActiveSymbolsCoreAsync(
             _workspace.Timeframe,
             reloadAll: false,
-            onlySymbol: symbol);
+            onlySymbol: symbol,
+            request);
     }
 
     private async Task ReloadActiveSymbolsAsync(
@@ -307,30 +315,58 @@ internal sealed partial class MainForm
         bool reloadAll,
         string? onlySymbol = null)
     {
-        await _reloadGate.WaitAsync(_stop.Token);
+        using LatestRequestCoordinator.RequestLease request =
+            BeginDataRequest(cancelStream: true);
+        await ReloadActiveSymbolsCoreAsync(
+            timeframe,
+            reloadAll,
+            onlySymbol,
+            request);
+    }
+
+    private async Task ReloadActiveSymbolsCoreAsync(
+        CandleTimeframe timeframe,
+        bool reloadAll,
+        string? onlySymbol,
+        LatestRequestCoordinator.RequestLease request)
+    {
+        bool gateEntered = false;
         try
         {
+            await _reloadGate.WaitAsync(request.Token);
+            gateEntered = true;
+            request.ThrowIfSuperseded();
+
             _frameTimer.Stop();
             await StopStreamAsync();
+            request.ThrowIfSuperseded();
+
             timeframe.Validate();
             _workspace.SetTimeframe(timeframe);
             SynchronizeDataControls();
 
+            string selectedSymbol = _selectedSymbol;
             string[] symbols = reloadAll
                 ? _activeSymbols.ToArray()
-                : [NormalizeSymbol(onlySymbol ?? _selectedSymbol)];
+                : [NormalizeSymbol(onlySymbol ?? selectedSymbol)];
             _statusLabel.Text =
                 $"{timeframe} 과거봉 {_requestedHistoryCount:N0}개 조회 중...";
 
             foreach (string symbol in symbols)
             {
+                request.ThrowIfSuperseded();
                 IReadOnlyList<Candle> history = await _source.GetHistoryAsync(
                     new HistoryRequest(
                         symbol,
                         timeframe,
                         _requestedHistoryCount),
-                    _stop.Token);
-                await _engine.LoadHistoryAsync(symbol, history, _stop.Token);
+                    request.Token);
+                request.ThrowIfSuperseded();
+                await _engine.LoadHistoryAsync(
+                    symbol,
+                    history,
+                    request.Token);
+                request.ThrowIfSuperseded();
             }
 
             _lastVersion = -1;
@@ -343,16 +379,23 @@ internal sealed partial class MainForm
                     snapshot.Candles.Length,
                     followLatest: true);
             }
-            await RefreshSelectedMetadataAsync();
+
+            await RefreshMetadataForSymbolAsync(
+                selectedSymbol,
+                request.Token);
+            request.ThrowIfSuperseded();
 
             if (SupportsRealtime(timeframe))
             {
                 string[] streamSymbols = _activeSymbols.ToArray();
-                _streamStop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                long streamGeneration = BeginDataStreamGeneration();
+                _streamStop =
+                    CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
                 CancellationToken streamToken = _streamStop.Token;
                 _streamTask = PumpRealtimeSymbolsAsync(
                     streamSymbols,
                     timeframe,
+                    streamGeneration,
                     streamToken);
                 _statusLabel.Text =
                     $"{timeframe} 실시간 연결 | 총 {_requestedHistoryCount:N0}봉";
@@ -363,20 +406,28 @@ internal sealed partial class MainForm
                     $"{timeframe} 과거 차트 | 총 {_requestedHistoryCount:N0}봉";
             }
 
+            request.ThrowIfSuperseded();
             _frameTimer.Start();
             SynchronizeViewportDisplayCount(force: true);
             _chart.Focus();
             _chart.Invalidate();
         }
+        catch
+        {
+            if (request.IsCurrent && !_stop.IsCancellationRequested)
+                _frameTimer.Start();
+            throw;
+        }
         finally
         {
-            _reloadGate.Release();
+            if (gateEntered) _reloadGate.Release();
         }
     }
 
     private async Task PumpRealtimeSymbolsAsync(
         IReadOnlyList<string> symbols,
         CandleTimeframe timeframe,
+        long streamGeneration,
         CancellationToken cancellationToken)
     {
         try
@@ -394,11 +445,15 @@ internal sealed partial class MainForm
         }
         catch (Exception exception)
         {
-            if (!IsDisposed && IsHandleCreated)
+            if (!IsDisposed &&
+                IsHandleCreated &&
+                IsCurrentDataStream(streamGeneration))
             {
                 BeginInvoke(() =>
                 {
-                    _statusLabel.Text = "실시간 오류: " + exception.Message;
+                    if (!IsDisposed &&
+                        IsCurrentDataStream(streamGeneration))
+                        _statusLabel.Text = "실시간 오류: " + exception.Message;
                 });
             }
         }
@@ -406,12 +461,13 @@ internal sealed partial class MainForm
 
     private async Task ExecuteDataCommandAsync(Func<Task> command)
     {
+        Interlocked.Increment(ref _activeDataCommandCount);
         try
         {
-            _reloadDataButton.Enabled = false;
+            if (!IsDisposed) _reloadDataButton.Enabled = false;
             await command();
         }
-        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
@@ -421,7 +477,9 @@ internal sealed partial class MainForm
         }
         finally
         {
-            if (!IsDisposed) _reloadDataButton.Enabled = true;
+            int remaining = Interlocked.Decrement(ref _activeDataCommandCount);
+            if (!IsDisposed && remaining == 0)
+                _reloadDataButton.Enabled = true;
         }
     }
 
