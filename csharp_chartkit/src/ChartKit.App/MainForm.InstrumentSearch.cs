@@ -30,6 +30,12 @@ internal sealed partial class MainForm
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        InitializeModuleVisualContextForHandle();
+        InitializeInstrumentSearchForHandle();
+    }
+
+    private void InitializeInstrumentSearchForHandle()
+    {
         if (_instrumentSearchConfigured) return;
 
         _instrumentSearchConfigured = true;
@@ -196,10 +202,8 @@ internal sealed partial class MainForm
         _dataSymbolEditor.TextBox.Focus();
     }
 
-    private void HandleInstrumentSearchKey(Keys keyCode)
-    {
+    private void HandleInstrumentSearchKey(Keys keyCode) =>
         _ = HandleInstrumentSearchKeyAsync(keyCode);
-    }
 
     private async Task HandleInstrumentSearchKeyAsync(Keys keyCode)
     {
@@ -343,10 +347,8 @@ internal sealed partial class MainForm
 
     private void OnInstrumentSearchFormClosing(
         object? sender,
-        FormClosingEventArgs e)
-    {
+        FormClosingEventArgs e) =>
         DisposeInstrumentSearch();
-    }
 
     private void DisposeInstrumentSearch()
     {
