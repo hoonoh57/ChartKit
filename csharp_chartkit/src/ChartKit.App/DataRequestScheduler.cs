@@ -196,29 +196,33 @@ internal sealed class DataRequestScheduler : IDisposable
                 return;
             }
 
+            Request activeRequest = request ??
+                throw new InvalidOperationException(
+                    "The data request runner entered an invalid empty state.");
+
             RaiseStateChanged();
             try
             {
-                await request!.Operation(_token);
-                request.Completion.TrySetResult(DataRequestOutcome.Completed);
+                await activeRequest.Operation(_token);
+                activeRequest.Completion.TrySetResult(DataRequestOutcome.Completed);
             }
             catch (OperationCanceledException) when (_token.IsCancellationRequested)
             {
-                request.Completion.TrySetCanceled(_token);
+                activeRequest.Completion.TrySetCanceled(_token);
             }
             catch (Exception exception)
             {
-                request.Completion.TrySetException(exception);
+                activeRequest.Completion.TrySetException(exception);
             }
             finally
             {
                 long completedTimestamp = Stopwatch.GetTimestamp();
                 long duration = ElapsedMilliseconds(
-                    request.StartedTimestamp,
+                    activeRequest.StartedTimestamp,
                     completedTimestamp);
                 lock (_sync)
                 {
-                    if (ReferenceEquals(_running, request))
+                    if (ReferenceEquals(_running, activeRequest))
                         _running = null;
                     _totalCompleted++;
                     _lastCompletedMilliseconds = duration;
