@@ -6,6 +6,7 @@ internal sealed partial class MainForm
 {
     private const int InstrumentSearchLimit = 20;
     private const int InstrumentSearchDebounceMilliseconds = 120;
+    private const int RecentInstrumentLimit = 10;
     private const int WmKeyDown = 0x0100;
 
     private readonly ToolStripDropDown _instrumentSearchDropDown = new()
@@ -19,6 +20,7 @@ internal sealed partial class MainForm
         IntegralHeight = false,
         ItemHeight = 24
     };
+    private readonly List<string> _recentInstrumentSymbols = new();
     private ToolStripControlHost? _instrumentSearchHost;
     private SymbolEditorMessageFilter? _instrumentSearchMessageFilter;
     private CancellationTokenSource? _instrumentSearchStop;
@@ -26,6 +28,7 @@ internal sealed partial class MainForm
     private bool _instrumentSearchConfigured;
     private bool _applyingInstrumentChoice;
     private bool _instrumentSearchDisposed;
+    private bool _selectAllSymbolOnMouseUp;
 
     protected override void OnHandleCreated(EventArgs e)
     {
@@ -39,6 +42,7 @@ internal sealed partial class MainForm
         if (_instrumentSearchConfigured) return;
 
         _instrumentSearchConfigured = true;
+        InitializeRecentInstrumentHistory();
         ConfigureInstrumentSearch();
         _instrumentSearchMessageFilter = new SymbolEditorMessageFilter(this);
         Application.AddMessageFilter(_instrumentSearchMessageFilter);
@@ -50,6 +54,14 @@ internal sealed partial class MainForm
     {
         _dataSymbolEditor.ToolTipText =
             "종목명 또는 6자리 코드를 입력하고 검색 목록에서 선택하십시오.";
+        _dataSymbolEditor.TextBox.Enter += OnSymbolEditorEnter;
+        _dataSymbolEditor.TextBox.MouseUp += OnSymbolEditorMouseUp;
+        _symbolHistoryButton.DropDownOpening += (_, _) =>
+        {
+            RememberRecentInstrument(_selectedSymbol, refreshMenu: false);
+            RefreshRecentInstrumentMenu();
+        };
+
         _instrumentSearchList.Font = new Font(
             Font.FontFamily,
             Math.Max(9f, Font.Size),
@@ -72,6 +84,24 @@ internal sealed partial class MainForm
         };
         _instrumentSearchDropDown.Items.Add(_instrumentSearchHost);
         _dataSymbolEditor.TextChanged += OnInstrumentSearchTextChanged;
+    }
+
+    private void OnSymbolEditorEnter(object? sender, EventArgs e)
+    {
+        _selectAllSymbolOnMouseUp = Control.MouseButtons != MouseButtons.None;
+        if (!IsHandleCreated || IsDisposed) return;
+        BeginInvoke(() =>
+        {
+            if (!IsDisposed && _dataSymbolEditor.TextBox.Focused)
+                _dataSymbolEditor.TextBox.SelectAll();
+        });
+    }
+
+    private void OnSymbolEditorMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (!_selectAllSymbolOnMouseUp) return;
+        _selectAllSymbolOnMouseUp = false;
+        _dataSymbolEditor.TextBox.SelectAll();
     }
 
     private void OnInstrumentSearchTextChanged(object? sender, EventArgs e)
@@ -235,7 +265,7 @@ internal sealed partial class MainForm
                     IsDirectSymbolText(text))
                 {
                     await ExecuteDataCommandAsync(
-                        () => CommitSymbolAsync(text));
+                        () => CommitDirectSymbolAsync(text));
                     return;
                 }
 
@@ -247,6 +277,10 @@ internal sealed partial class MainForm
 
     private InstrumentSearchResult? ResolveSelectedInstrument()
     {
+        if (_instrumentSearchDropDown.Visible &&
+            _instrumentSearchList.SelectedItem is InstrumentChoice highlighted)
+            return highlighted.Value;
+
         string query = NormalizeSearchQuery(_dataSymbolEditor.Text);
         InstrumentSearchResult? only = null;
         foreach (object item in _instrumentSearchList.Items)
@@ -260,9 +294,6 @@ internal sealed partial class MainForm
                 return choice.Value;
         }
 
-        if (_instrumentSearchDropDown.Visible &&
-            _instrumentSearchList.SelectedItem is InstrumentChoice selected)
-            return selected.Value;
         return _instrumentSearchList.Items.Count == 1 ? only : null;
     }
 
@@ -299,6 +330,87 @@ internal sealed partial class MainForm
             _source.Name,
             DateTimeOffset.UtcNow);
         await CommitSymbolAsync(choice.Symbol);
+        RememberRecentInstrument(choice.Symbol);
+    }
+
+    private async Task CommitDirectSymbolAsync(string text)
+    {
+        string symbol = NormalizeSymbol(text);
+        await CommitSymbolAsync(symbol);
+        RememberRecentInstrument(symbol);
+    }
+
+    private async Task CommitRecentInstrumentAsync(string symbol)
+    {
+        await CommitSymbolAsync(symbol);
+        RememberRecentInstrument(symbol);
+    }
+
+    private void InitializeRecentInstrumentHistory()
+    {
+        _recentInstrumentSymbols.Clear();
+        int count = Math.Min(RecentInstrumentLimit, _activeSymbols.Count);
+        for (int index = 0; index < count; index++)
+        {
+            string symbol = _activeSymbols[index];
+            if (!_recentInstrumentSymbols.Contains(symbol, StringComparer.Ordinal))
+                _recentInstrumentSymbols.Add(symbol);
+        }
+        RefreshRecentInstrumentMenu();
+    }
+
+    private void RememberRecentInstrument(
+        string? value,
+        bool refreshMenu = true)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        string symbol = value.Trim().ToUpperInvariant();
+        int existing = _recentInstrumentSymbols.FindIndex(
+            item => string.Equals(item, symbol, StringComparison.Ordinal));
+        if (existing >= 0) _recentInstrumentSymbols.RemoveAt(existing);
+        _recentInstrumentSymbols.Insert(0, symbol);
+        if (_recentInstrumentSymbols.Count > RecentInstrumentLimit)
+        {
+            _recentInstrumentSymbols.RemoveRange(
+                RecentInstrumentLimit,
+                _recentInstrumentSymbols.Count - RecentInstrumentLimit);
+        }
+        if (refreshMenu) RefreshRecentInstrumentMenu();
+    }
+
+    private void RefreshRecentInstrumentMenu()
+    {
+        _symbolHistoryButton.DropDownItems.Clear();
+        foreach (string symbol in _recentInstrumentSymbols)
+        {
+            string captured = symbol;
+            string displayName = ResolveRecentInstrumentName(symbol);
+            string text = displayName.Length == 0
+                ? symbol
+                : $"{displayName} [{symbol}]";
+            _symbolHistoryButton.DropDownItems.Add(
+                text,
+                null,
+                async (_, _) => await ExecuteDataCommandAsync(
+                    () => CommitRecentInstrumentAsync(captured)));
+        }
+        _symbolHistoryButton.Enabled = _recentInstrumentSymbols.Count > 0;
+        _symbolHistoryButton.ToolTipText =
+            $"최근 조회 종목 선택 (최대 {RecentInstrumentLimit}개)";
+    }
+
+    private string ResolveRecentInstrumentName(string symbol)
+    {
+        if (_metadataCache.TryGetValue(symbol, out InstrumentMetadata? metadata) &&
+            !string.IsNullOrWhiteSpace(metadata.DisplayName) &&
+            !string.Equals(metadata.DisplayName, symbol, StringComparison.Ordinal))
+            return metadata.DisplayName.Trim();
+        if (_selectedMetadata is not null &&
+            string.Equals(_selectedMetadata.Symbol, symbol, StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(_selectedMetadata.DisplayName) &&
+            !string.Equals(_selectedMetadata.DisplayName, symbol, StringComparison.Ordinal))
+            return _selectedMetadata.DisplayName.Trim();
+        return string.Empty;
     }
 
     private void StartInstrumentSearchWarmup()
