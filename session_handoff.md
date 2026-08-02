@@ -6,7 +6,6 @@
 기준 브랜치: `csharp/standalone-engine`  
 기능 브랜치: `csharp/symbol-switch-cancellation`  
 기준 브랜치 커밋: `22396f0fa47032ef74d796a1ec94d0b306a94f51`  
-현재 기능 HEAD: `7768b6d69f06c2ba8d0055148442f6aa5c4fd07f`  
 기능 Draft PR: `#23`  
 장기 Draft PR: `#3 Build standalone C# multi-symbol chart engine`  
 장중 검증 Draft PR: `#21 Add Kiwoom actual-session validation probe`
