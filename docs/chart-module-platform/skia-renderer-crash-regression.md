@@ -30,3 +30,5 @@ The renderer now:
 5. confirm VWAP profile restoration and `faults 0` after restart.
 
 The VWAP parity PR must remain Draft until the desktop restart reproducer completes without a native crash.
+
+Incident branch head must be verified exactly before Ready/merge.
