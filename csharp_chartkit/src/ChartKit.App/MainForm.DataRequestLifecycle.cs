@@ -1,18 +1,26 @@
-using ChartKit.CSharp.Contracts;
-
 namespace ChartKit.CSharp.App;
 
 internal sealed partial class MainForm
 {
-    private readonly LatestRequestCoordinator _dataRequestCoordinator = new();
-    private int _activeDataCommandCount;
-    private long _dataStreamGeneration;
+    private readonly ToolStripStatusLabel _dataRequestStatusLabel = new()
+    {
+        AutoSize = true,
+        BorderSides = ToolStripStatusLabelBorderSides.Left,
+        Padding = new Padding(8, 0, 4, 0),
+        Visible = false
+    };
+    private DataRequestScheduler? _dataRequestScheduler;
     private bool _dataRequestLifecycleInstalled;
 
     private void InstallDataRequestLifecycle()
     {
         if (_dataRequestLifecycleInstalled) return;
         _dataRequestLifecycleInstalled = true;
+
+        _dataRequestScheduler = new DataRequestScheduler(_stop.Token);
+        _dataRequestScheduler.StateChanged += OnDataRequestSchedulerStateChanged;
+        _statusStrip.Items.Add(_dataRequestStatusLabel);
+        _frameTimer.Tick += (_, _) => RefreshDataRequestStatus();
 
         Shown -= OnShown;
         Shown += OnDataControlsShown;
@@ -32,70 +40,101 @@ internal sealed partial class MainForm
         object? sender,
         FormClosingEventArgs e)
     {
-        Interlocked.Increment(ref _dataStreamGeneration);
         _streamStop?.Cancel();
-        _dataRequestCoordinator.Dispose();
+        if (_dataRequestScheduler is not null)
+        {
+            _dataRequestScheduler.StateChanged -=
+                OnDataRequestSchedulerStateChanged;
+            _dataRequestScheduler.Dispose();
+            _dataRequestScheduler = null;
+        }
     }
 
-    private LatestRequestCoordinator.RequestLease BeginDataRequest(
-        bool cancelStream)
+    private Task<DataRequestOutcome> EnqueueDataCommandAsync(
+        Func<Task> command)
     {
-        LatestRequestCoordinator.RequestLease request =
-            _dataRequestCoordinator.Begin(_stop.Token);
-        if (cancelStream || request.ReplacedCurrent)
-        {
-            Interlocked.Increment(ref _dataStreamGeneration);
-            _streamStop?.Cancel();
-        }
-        return request;
+        ArgumentNullException.ThrowIfNull(command);
+        DataRequestScheduler scheduler = _dataRequestScheduler ??
+            throw new InvalidOperationException(
+                "Data request scheduler is not initialized.");
+        string description = BuildDataRequestDescription();
+        return scheduler.EnqueueAsync(
+            description,
+            _ => command());
     }
 
-    private long BeginDataStreamGeneration() =>
-        Interlocked.Increment(ref _dataStreamGeneration);
-
-    private bool IsCurrentDataStream(long generation) =>
-        generation == Volatile.Read(ref _dataStreamGeneration) &&
-        !_stop.IsCancellationRequested;
-
-    private async Task RefreshMetadataForSymbolAsync(
-        string symbol,
-        CancellationToken cancellationToken)
+    private string BuildDataRequestDescription()
     {
-        if (_metadataCache.TryGetValue(symbol, out InstrumentMetadata? cached))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (string.Equals(_selectedSymbol, symbol, StringComparison.Ordinal))
-                _selectedMetadata = cached;
-            return;
-        }
+        string symbol = _dataSymbolEditor.Text.Trim();
+        if (symbol.Length == 0) symbol = _selectedSymbol;
+        string timeframe = _dataTimeframeEditor.Text.Trim();
+        if (timeframe.Length == 0) timeframe = _workspace.Timeframe.ToString();
+        string count = _historyCountEditor.Text.Trim();
+        return count.Length == 0
+            ? $"{symbol} {timeframe}"
+            : $"{symbol} {timeframe} {count}봉";
+    }
 
-        InstrumentMetadata metadata;
-        if (_source is IInstrumentMetadataSource metadataSource)
+    private void OnDataRequestSchedulerStateChanged()
+    {
+        if (IsDisposed) return;
+        if (IsHandleCreated && InvokeRequired)
         {
             try
             {
-                metadata = await metadataSource.GetInstrumentMetadataAsync(
-                    symbol,
-                    cancellationToken);
+                BeginInvoke(RefreshDataRequestStatus);
             }
-            catch (OperationCanceledException)
-                when (cancellationToken.IsCancellationRequested)
+            catch (InvalidOperationException)
             {
-                throw;
             }
-            catch
-            {
-                metadata = CreateFallbackMetadata(symbol);
-            }
+            return;
         }
-        else
+        RefreshDataRequestStatus();
+    }
+
+    private void RefreshDataRequestStatus()
+    {
+        if (IsDisposed || _dataRequestScheduler is null) return;
+        DataRequestSchedulerSnapshot snapshot =
+            _dataRequestScheduler.GetSnapshot();
+
+        _reloadDataButton.Enabled = !_stop.IsCancellationRequested;
+        if (snapshot.IsRunning)
         {
-            metadata = CreateFallbackMetadata(symbol);
+            _dataRequestStatusLabel.Visible = true;
+            if (snapshot.HasPending)
+            {
+                _dataRequestStatusLabel.Text =
+                    $"이전 요청 처리 중 {FormatRequestSeconds(snapshot.RunningElapsedMilliseconds)}" +
+                    $" · 다음 요청 대기 {FormatRequestSeconds(snapshot.PendingWaitMilliseconds)}";
+                _reloadDataButton.Text = "대기";
+            }
+            else
+            {
+                _dataRequestStatusLabel.Text =
+                    $"데이터 처리 중 {FormatRequestSeconds(snapshot.RunningElapsedMilliseconds)}";
+                _reloadDataButton.Text = "처리중";
+            }
+            return;
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
-        _metadataCache[symbol] = metadata;
-        if (string.Equals(_selectedSymbol, symbol, StringComparison.Ordinal))
-            _selectedMetadata = metadata;
+        _reloadDataButton.Text = "조회";
+        if (snapshot.TotalCompleted == 0)
+        {
+            _dataRequestStatusLabel.Visible = false;
+            _dataRequestStatusLabel.Text = string.Empty;
+            return;
+        }
+
+        _dataRequestStatusLabel.Visible = true;
+        _dataRequestStatusLabel.Text =
+            $"최근 {FormatRequestSeconds(snapshot.LastCompletedMilliseconds)}" +
+            $" · 최대 {FormatRequestSeconds(snapshot.MaxCompletedMilliseconds)}" +
+            (snapshot.TotalCoalesced == 0
+                ? string.Empty
+                : $" · 대기 병합 {snapshot.TotalCoalesced:N0}");
     }
+
+    private static string FormatRequestSeconds(long milliseconds) =>
+        $"{milliseconds / 1000d:0.0}s";
 }
