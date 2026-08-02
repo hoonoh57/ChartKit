@@ -1,83 +1,92 @@
 # ChartKit C# 세션 인수인계
 
-작성 시각: 2026-08-01 14:58 KST  
+작성 시각: 2026-08-02 08:52 KST  
 저장소: `hoonoh57/ChartKit`  
-작업 브랜치: `csharp/standalone-engine`  
-Draft PR: `#3 Build standalone C# multi-symbol chart engine`  
-PR base: `improve/chart-engine-hardening`  
+로컬 경로: `E:\2026\gpt\vb\sciaChart\ChartKit`  
+현재 작업 브랜치: `csharp/module-platform-p2-vwap-parity`  
+VWAP 자동검증 기능 HEAD: `842fccfc8b8a8bc34a4c42294b8dfb4336cc3a7d`  
+기준 브랜치: `csharp/standalone-engine`  
+기준 브랜치 HEAD: `22886133c1358d8c3b4c33a1f46fa558f4ceb6e9`  
+VWAP Draft PR: `#20 Migrate VWAP to the module platform with legacy parity`  
+장기 Draft PR: `#3 Build standalone C# multi-symbol chart engine`  
 기존 VB 안정 기준: `316f0decfa5981d081f88585d4db5d4d18830c0f`
 
-검증된 기능 코드 체크포인트:
-
-```text
-bd21cd849d44c5e4d892701326377b825f3af67d
-```
-
-모듈 플랫폼 Baseline 및 nullable 정리 검증 체크포인트:
-
-```text
-68bfbf73603bf5e729d8f5388b20313194463bff
-checkpoint/csharp-module-baseline-nullability-pass
-```
-
-병합 완료:
-
-```text
-PR #4 Architecture Baseline 1.0
-merge commit 65000f0cd3ec8c346c8007f28e712ea3423844e3
-
-PR #5 Realtime diagnostics nullability
-merge commit 68bfbf73603bf5e729d8f5388b20313194463bff
-```
-
-Windows CI — 체크포인트 `68bfbf7...`:
-
-```text
-ChartKit CSharp Engine
-run 30686893110
-result success
-
-ChartKit CSharp Legacy Inventory
-run 30686893109
-result success
-```
-
-로컬 검증:
-
-```text
-Release build PASS
-DataSources CS8602 0
-EngineVerification PASS
-ChartKit.App self-test PASS
-OpenTK NU1701만 잔존
-```
-
-기존 복원 체크포인트:
-
-```text
-checkpoint/csharp-120tick-source-order-pass
-checkpoint/csharp-rest-realtime-boundary-pass
-checkpoint/csharp-representative-trading-day-pass
-checkpoint/csharp-realtime-reconnect-pass
-checkpoint/csharp-module-file-standard-pass
-checkpoint/csharp-module-baseline-nullability-pass
-```
-
-현재 브랜치가 검증 기준을 포함하는지 확인:
-
-```powershell
-git merge-base --is-ancestor `
-  68bfbf73603bf5e729d8f5388b20313194463bff `
-  HEAD
-
-$LASTEXITCODE   # 0이어야 함
-```
+> 이 문서 커밋은 자동검증 기능 HEAD 위에 존재한다.  
+> 다음 세션에서는 `git log -3 --oneline`으로 문서 커밋과 `842fccf...` 기능 HEAD를 함께 확인한다.
 
 ---
 
-# 0. 최상위 금지사항 — 틱 데이터 순서
+# 0. 다음 세션이 반드시 먼저 읽을 사항
 
-Cybos 틱 데이터는 `HHmm`까지만 제공될 수 있으므로 같은 분 안의 실제 체결 순서는 배열 위치로 보존한다.
+## 0-1. 현재 실제 상태
+
+```text
+P1 모듈 플랫폼 기반             완료·병합
+P1 App/Renderer 수직 연결        완료·병합
+P2 SMA parity                    완료·병합
+P2 RSI parity                    완료·병합
+P2 MACD parity                   완료·병합
+P2 SuperTrend parity             완료·병합
+P2 JMA parity                    완료·병합
+P2 OBV parity                    완료·병합
+P2 Disparity parity              완료·병합
+P2 VWAP parity                   구현·자동검증 완료, Draft PR #20
+VWAP 실제 화면 중첩 smoke        미완료
+PR #20 Ready/merge/checkpoint     미완료
+실제 장중 WebSocket              미완료
+물리 네트워크 재연결             미완료
+장중 soak                        미완료
+```
+
+VWAP 구현 전 데이터 계약 충돌은 해결됐다.
+
+```text
+ChartPrimaryBar
+  + DateOnly TradingDate
+
+Candle.TradingDate
+  → MainForm.CreatePrimarySeriesSnapshot
+  → ChartPrimaryBar.TradingDate
+  → VwapSeriesRuntime
+```
+
+`VwapSeriesRuntime`은 `DateOnly.MinValue`를 허용하지 않는다.
+
+## 0-2. 지금 절대 하지 말아야 할 일
+
+```text
+PR #20을 자동으로 Ready 전환하거나 병합
+화면 중첩 검증 없이 VWAP 완료 선언
+PR #3 병합
+PR #3을 실제 장중 검증 완료로 표현
+scripted reconnect를 물리 reconnect로 표현
+틱 데이터를 시간·가격·수량·sequence로 재정렬
+동일 HHmm 체결 또는 동일 가격·수량 체결 삭제
+VWAP 세션 경계를 Sequence나 봉 개수로 추정
+Renderer에 VWAP 전용 분기 추가
+MainForm에 VWAP 전용 UI 처리 추가
+```
+
+## 0-3. 다음 첫 작업
+
+다음 세션의 첫 작업은 코드 구현이 아니다.
+
+```text
+1. 원격 브랜치 pull
+2. 기능 HEAD와 문서 HEAD 확인
+3. 로컬 동일 검증 재실행
+4. 실제 데스크톱에서 Legacy VWAP 5선과 Module VWAP 5선 중첩 확인
+5. 다일 replay에서 거래일 첫 봉 reset 시각 확인
+6. 설정·색상 변경 및 재시작 복원 확인
+```
+
+수동 검증이 성공한 뒤에만 PR #20을 Ready → exact-head merge한다.
+
+---
+
+# 1. 최상위 불변식 — 시장 데이터 순서
+
+Cybos 틱 데이터는 `HHmm`까지만 제공될 수 있으므로 같은 분 안의 실제 체결 순서는 공급자 배열 위치로 보존한다.
 
 금지:
 
@@ -103,32 +112,56 @@ ReverseWhole
 
 `ChartKit.DataSources`의 정렬 API는 CI 단계 `Reject DataSources row-reordering APIs`가 차단한다.
 
+동일 시각·동일 가격·동일 수량 체결은 신뢰 가능한 공급자 체결번호가 없으므로 중복 제거하지 않는다.
+
+VWAP 변경은 DataSources 순서 처리에 손대지 않았다.
+
 ---
 
-# 1. 제품 구조
+# 2. 제품·모듈 구조
 
 ```text
 csharp_chartkit
 ├─ src/ChartKit.Contracts
 ├─ src/ChartKit.Engine
 ├─ src/ChartKit.Charting
-├─ src/ChartKit.Rendering
 ├─ src/ChartKit.DataSources
+├─ src/ChartKit.Modules.Abstractions
+├─ src/ChartKit.Modules.Platform
+├─ src/ChartKit.Modules.Indicators
+├─ src/ChartKit.ModuleHost
+├─ src/ChartKit.Persistence
+├─ src/ChartKit.Scene
+├─ src/ChartKit.Composition
+├─ src/ChartKit.UiModel
+├─ src/ChartKit.Rendering
 ├─ src/ChartKit.App
 ├─ tests/ChartKit.EngineVerification
 ├─ migration/LegacyInventory
 └─ migration/LegacyParity
 ```
 
-경계:
+표준 연결 경로:
 
 ```text
-Contracts: Candle/Timeframe/Event/Snapshot 계약
-Engine: 다종목 FIFO, bounded channel, ring buffer, 지표
-Charting: viewport, 축, 패널, 호가단위, 십자선
-Rendering: 계산된 ChartFrame/Snapshot만 렌더링
-DataSources: Kiwoom REST/WebSocket, replay, 정상화, 집계
-App: WinForms shell과 사용자 명령
+ChartProfile
+→ Module Registry / ChartModuleHost
+→ 활성 Module
+→ ChartContribution
+→ SceneCompiler
+→ immutable ChartRenderPlan
+→ generic SkiaChartRenderer
+```
+
+핵심 경계:
+
+```text
+Renderer는 기능 이름을 모른다.
+Module은 SkiaSharp와 WinForms를 모른다.
+UI는 지표별 메뉴·설정 Form을 하드코딩하지 않는다.
+Context Menu·Quick Toolbar·Property Inspector는 같은 metadata에서 생성한다.
+기능 On/Off는 범용 명령으로 처리한다.
+비활성 모듈에는 데이터가 전달되지 않고 Contribution도 0이어야 한다.
 ```
 
 금지 참조:
@@ -137,256 +170,26 @@ App: WinForms shell과 사용자 명령
 Engine → WinForms/SkiaSharp
 Rendering → DataSources
 Charting → DataSources/WinForms
-C# product solution → VB project
+Modules → WinForms/SkiaSharp
+Renderer → SMA/RSI/MACD/VWAP 등 기능별 형식
+C# product solution → VB runtime project
 ```
 
 ---
 
-# 2. 완료 상태
-
-```text
-독립 C# WinForms 앱
-Windows publish
-종목별 FIFO와 종목 간 병렬 처리
-bounded channel/backpressure
-고정 용량 ring buffer
-20종목 self-test
-MA/JMA/RSI/OBV/Disparity/MACD/SuperTrend/VWAP
-VB↔C# 지표 parity
-Skia 차트·축·패널·호가단위·십자선·레전드
-Kiwoom REST 과거봉
-Kiwoom WebSocket 계약
-replay
-```
-
-120틱 검증:
-
-```text
-034020_AL
-120T
-총 4,000봉
-gap 0
-errors 0
-30틱 원본 16,004행
-17개 연속조회 페이지
-동일 HHmm 원본 행 전부 보존
-정렬·중복 제거 없음
-ReverseWhole만 사용
-최종 120틱 4,000봉 OHLCV 검증
-```
-
----
-
-# 3. REST → WebSocket 경계 진단
-
-화면 표시:
-
-```text
-연결: connecting/login/registered/receiving/reconnecting/faulted
-경계: waiting/seed-update/seed-append/no-seed-append
-Update/Append 수
-연결 시도/등록 수
-stale 거부 수
-REST seed 시각
-첫 realtime 시각
-```
-
-틱 실시간 정책:
-
-```text
-동일 시각 체결 허용
-현재 틱봉 마지막 체결시각보다 엄격히 과거인 이벤트만 stale 거부
-정렬 없음
-동일 시각 중복 제거 없음
-```
-
-휴장일 로컬 확인:
-
-```text
-day closed
-ws registered
-boundary waiting
-events 0
-stale 0
-errors 0
-```
-
----
-
-# 4. 거래일·휴장 판정
-
-대표종목:
-
-```text
-005930 삼성전자
-000660 SK하이닉스
-```
-
-계약:
-
-```text
-오늘:
-  각 대표종목 최신 1분봉 1건
-  하나라도 오늘 날짜 → TradingDay
-  둘 다 정상이나 오늘 날짜 없음 → NoTradingDay
-
-과거:
-  각 대표종목 일봉 1건
-  base_dt가 대상 날짜와 일치 → TradingDay
-  둘 다 정상이나 정확한 날짜 없음 → NoTradingDay
-
-조회 실패·일부 실패·미래 날짜:
-  Unknown
-```
-
-중요:
-
-```text
-오늘은 분봉, 과거는 일봉 사용
-과거 휴장일 판정에 분봉 연속조회 금지
-대표종목 probe는 realtime seed 저장·덮어쓰기 금지
-실제 realtime 이벤트가 오면 no-data 판정보다 TradingDay 우선
-```
-
-자동검증:
-
-```text
-csharp_trading_day_today_minute=PASS
-csharp_trading_day_history_daily=PASS
-csharp_trading_day_failure_unknown=PASS
-```
-
----
-
-# 5. WebSocket 재연결 자동검증
-
-구현:
-
-```text
-csharp_chartkit/src/ChartKit.DataSources/IKiwoomWebSocket.cs
-csharp_chartkit/src/ChartKit.DataSources/KiwoomRestDataSource.Realtime.cs
-csharp_chartkit/tests/ChartKit.EngineVerification/ScriptedKiwoomWebSocket.cs
-csharp_chartkit/tests/ChartKit.EngineVerification/KiwoomRealtimeReconnectVerification.cs
-```
-
-검증 시나리오:
-
-```text
-REST seed
-첫 연결 LOGIN/REG 각 1회
-seed 봉 Update
-연결 종료
-두 번째 연결 LOGIN/REG 각 1회
-같은 봉 Update
-다음 봉 Append
-```
-
-검증 내용:
-
-```text
-재연결 중 RealtimeCandleBuilder 유지
-누적 거래량 연속
-sequence 정상 증가
-연결당 LOGIN 1회
-연결당 REG 1회
-ConnectionAttempts 2
-RegistrationCount 2
-stale 0
-```
-
-자동검증:
-
-```text
-csharp_realtime_reconnect_continuity=PASS
-csharp_realtime_one_registration_per_connection=PASS
-csharp_realtime_builder_survives_reconnect=PASS
-```
-
-동일 시각·동일 가격·동일 수량 체결은 신뢰 가능한 공급자 체결번호가 없으므로 중복 제거하지 않는다.
-
----
-
-# 6. nullable 경고 정리
-
-원인:
-
-```text
-TryGetRealtimeDiagnosticsState가 성공 시 non-null임을 컴파일러가 알지 못함
-```
-
-수정:
-
-```csharp
-[NotNullWhen(true)] out RealtimeDiagnosticsState? state
-```
-
-결과:
-
-```text
-DataSources CS8602 5개 제거
-호출부와 reconnect 동작 변경 없음
-null-forgiving 연산자로 경고 은폐하지 않음
-Release build PASS
-EngineVerification PASS
-App self-test PASS
-```
-
-잔존 경고:
-
-```text
-OpenTK 3.1.0 NU1701
-OpenTK.GLControl 3.1.0 NU1701
-```
-
-이 경고는 GPU/OpenGL 의존성 정리 단계에서 별도 처리한다.
-
----
-
-# 7. Architecture Baseline 1.0 — 확정
+# 3. Architecture Baseline 1.0
 
 상태:
 
 ```text
 Architecture Baseline 1.0
 Approved
+P1 수직 경로 구현 완료
 ```
 
-기준 문서:
+모든 플랫폼 진입 `*Module.cs`는 상단에 `<chart-module>` 계약을 가진다.
 
-```text
-docs/chart-module-platform/README.md
-docs/chart-module-platform/architecture-baseline-1.0.md
-docs/chart-module-platform/architecture-constitution.md
-docs/chart-module-platform/feature-capability-matrix.md
-docs/chart-module-platform/implementation-roadmap.md
-docs/chart-module-platform/module-file-standard.md
-docs/chart-module-platform/templates/ChartModule.template.cs
-scripts/verify_chart_module_headers.ps1
-```
-
-표준 연결 경로:
-
-```text
-<Feature>Module.cs
-→ Module Registry
-→ ChartProfile On/Off
-→ 표준 Contribution
-→ SceneCompiler
-→ immutable ChartRenderPlan
-→ 범용 SkiaChartRenderer
-```
-
-기능 단위:
-
-```text
-개별 기능 → 개별 <Feature>Module.cs 또는 작은 기능 폴더
-유사 기능군 → 하나의 ChartKit.Modules.* 프로젝트
-특수 런타임·독립 배포 → 별도 프로젝트 또는 플러그인
-```
-
-모든 신규 `*Module.cs` 파일은 상단에 `<chart-module>` 연결 계약을 기록한다.
-
-필수 연결 정보:
+필수 키 13개:
 
 ```text
 Module-Id
@@ -404,48 +207,496 @@ Persistence
 Verification
 ```
 
-CI 검사:
+검사:
 
 ```powershell
 .\scripts\verify_chart_module_headers.ps1
 ```
 
-핵심 불변식:
+VWAP 자동검증 HEAD 결과:
 
 ```text
-Renderer는 개별 기능명을 모른다.
-Module은 SkiaSharp와 WinForms를 모른다.
-UI는 기능별 메뉴·설정 Form을 하드코딩하지 않는다.
-Context Menu·Quick Button·Property Inspector는 동일 메타데이터에서 생성한다.
-기능 On/Off는 범용 명령 하나로 처리한다.
-비활성 모듈 계산·구독·Contribution 비용은 0에 가깝게 유지한다.
+chart_module_header_contract=PASS module_files=9
+```
+
+VWAP 기준 문서:
+
+```text
+docs/chart-module-platform/vwap-module-parity-standard.md
 ```
 
 ---
 
-# 8. 로컬 동기화
+# 4. 병합 완료 이력
 
-현재 로컬이 `fix/csharp-realtime-nullability`에 있을 수 있으므로 기준 브랜치로 복귀한다.
+## Baseline / P1
+
+```text
+PR #4  Architecture Baseline 1.0
+merge 65000f0cd3ec8c346c8007f28e712ea3423844e3
+
+PR #5  Realtime diagnostics nullability
+merge 68bfbf73603bf5e729d8f5388b20313194463bff
+
+PR #6  P1-A contracts and scene foundations
+merge 27319e4ae895b13cde209544f08b85658c3738fe
+
+PR #7  P1-B module registry and host
+merge 8512d3e1e432a433051af10dacea85ec32bec610
+
+PR #8  P1-C composition and platform probe
+merge 11cad5a2eec92346c380f8f3040976466d926c2a
+
+PR #9  P1-D ChartProfile JSON persistence
+merge 54ac480188da9f7efa6fd753196705b75de2a731
+
+PR #10 P1-E generic UI metadata and property mutation
+merge 43752f75f3b9ce589d17bd46626f06a555fa361e
+
+PR #11 P1-F WinForms app shell integration
+merge 3e28c1924b3cc54aa0ca832adbfee6f4610c798a
+
+PR #12 P1-G ChartRenderPlan to Skia renderer
+merge 31a6b9f56b98add2786182458ea6379780ba8ada
+```
+
+## P2 Legacy 지표 모듈 이전
+
+```text
+PR #13 SMA
+merge 17f5dfe885009f5f74fa2d21d65c183ed7f32c5d
+
+PR #14 RSI
+merge 98e5a10da4b8313e31c73c451f01d6076a7697c0
+
+PR #15 MACD
+merge 43a40a9e05819579a2e5c1f9afce987a6318ba02
+
+PR #16 SuperTrend
+merge e81a0fb97aaee8ae004d83c6fc64cc8b27e5d67b
+
+PR #17 JMA
+merge eb449c092c75065756af80ffcd780670b7ba98ae
+
+PR #18 OBV
+merge d49170c9fb3df4c1de2a2c9a3623bbf165ee5010
+
+PR #19 Disparity
+merge 22886133c1358d8c3b4c33a1f46fa558f4ceb6e9
+```
+
+VWAP:
+
+```text
+PR #20
+Open
+Draft
+Unmerged
+Base csharp/standalone-engine
+Verified feature head 842fccfc8b8a8bc34a4c42294b8dfb4336cc3a7d
+```
+
+PR #3:
+
+```text
+Open
+Draft
+Unmerged
+Base improve/chart-engine-hardening
+Head csharp/standalone-engine
+Head SHA 22886133c1358d8c3b4c33a1f46fa558f4ceb6e9
+```
+
+**실제 장중 WebSocket·물리 재연결·soak 완료 전 PR #3을 병합하지 않는다.**
+
+---
+
+# 5. 복원 체크포인트
+
+시장 데이터·실시간:
+
+```text
+checkpoint/csharp-120tick-source-order-pass
+checkpoint/csharp-rest-realtime-boundary-pass
+checkpoint/csharp-representative-trading-day-pass
+checkpoint/csharp-realtime-reconnect-pass
+```
+
+모듈 플랫폼:
+
+```text
+checkpoint/csharp-module-file-standard-pass
+checkpoint/csharp-module-baseline-nullability-pass
+checkpoint/csharp-module-platform-p1a-pass
+checkpoint/csharp-module-platform-p1b-pass
+checkpoint/csharp-module-platform-p1c-pass
+checkpoint/csharp-module-platform-p1d-pass
+checkpoint/csharp-module-platform-p1e-pass
+checkpoint/csharp-module-platform-p1f-pass
+checkpoint/csharp-module-platform-p1g-pass
+checkpoint/csharp-module-platform-p2-sma-pass
+checkpoint/csharp-module-platform-p2-rsi-pass
+checkpoint/csharp-module-platform-p2-macd-pass
+checkpoint/csharp-module-platform-p2-supertrend-pass
+checkpoint/csharp-module-platform-p2-jma-pass
+checkpoint/csharp-module-platform-p2-obv-pass
+checkpoint/csharp-module-platform-p2-disparity-pass
+```
+
+아직 생성하지 않음:
+
+```text
+checkpoint/csharp-module-platform-p2-vwap-pass
+```
+
+PR #20 병합 후에만 생성한다.
+
+---
+
+# 6. TradingDate 데이터 계약
+
+대상 파일:
+
+```text
+csharp_chartkit/src/ChartKit.Modules.Abstractions/ChartModuleDataContracts.cs
+csharp_chartkit/src/ChartKit.App/MainForm.ModuleVisualContext.cs
+```
+
+현재 계약:
+
+```csharp
+public readonly record struct ChartPrimaryBar(
+    long Sequence,
+    DateOnly TradingDate,
+    double Open,
+    double High,
+    double Low,
+    double Close,
+    long Volume,
+    bool IsFinal)
+```
+
+기존 7개 비세션 지표 fixture의 변경 범위를 제한하기 위해 이전 시그니처 호환 생성자를 유지한다.
+
+```text
+기존 생성자 → DateOnly.MinValue
+실제 App 경로 → 명시적 TradingDate
+VWAP fixture → 명시적 TradingDate
+VWAP runtime → MinValue 거부
+```
+
+이 호환 생성자는 VWAP의 세션 경계 추론에 사용하지 않는다.
+
+App 전달:
+
+```csharp
+DateOnly.FromDateTime(candle.TradingDate)
+```
+
+`Candle.TradingDate`는 `OpenTime.Date`다.
+
+---
+
+# 7. VWAP Legacy 계약
+
+Legacy 파일:
+
+```text
+csharp_chartkit/src/ChartKit.Engine/VwapIndicator.cs
+```
+
+기본값:
+
+```text
+StdDev1 1.0
+StdDev2 2.0
+Panel   0 / price.main
+```
+
+출력 5개:
+
+```text
+Value
+Upper1
+Lower1
+Upper2
+Lower2
+```
+
+계산:
+
+```text
+typicalPrice = (High + Low + Close) / 3
+priceVolume += typicalPrice × Volume
+volume += Volume
+priceSquaredVolume += typicalPrice² × Volume
+
+VWAP = priceVolume / volume
+variance = max(0, priceSquaredVolume / volume - VWAP²)
+deviation = sqrt(variance)
+
+Upper1 = VWAP + StdDev1 × deviation
+Lower1 = VWAP - StdDev1 × deviation
+Upper2 = VWAP + StdDev2 × deviation
+Lower2 = VWAP - StdDev2 × deviation
+```
+
+거래일 변경 시 다음 누적 상태를 0으로 초기화한다.
+
+```text
+priceVolume
+volume
+priceSquaredVolume
+```
+
+누적 거래량이 0 이하이면 5개 출력 모두 `NaN`이다.
+
+UpdateLast 저장·복원 상태:
+
+```text
+priceVolume
+volume
+priceSquaredVolume
+lastTradingDate
+```
+
+---
+
+# 8. VWAP 구현 파일
+
+신규:
+
+```text
+csharp_chartkit/src/ChartKit.Modules.Indicators/VwapSeriesRuntime.cs
+csharp_chartkit/src/ChartKit.Modules.Indicators/VwapModule.cs
+csharp_chartkit/tests/ChartKit.EngineVerification/VwapModuleParityVerification.cs
+csharp_chartkit/src/ChartKit.App/VwapModuleAppVerification.cs
+docs/chart-module-platform/vwap-module-parity-standard.md
+```
+
+수정:
+
+```text
+csharp_chartkit/src/ChartKit.Modules.Abstractions/ChartModuleDataContracts.cs
+csharp_chartkit/src/ChartKit.App/MainForm.ModuleVisualContext.cs
+csharp_chartkit/src/ChartKit.App/ChartModulePlatformController.cs
+csharp_chartkit/src/ChartKit.App/AppSelfTestRunner.cs
+csharp_chartkit/tests/ChartKit.EngineVerification/Program.cs
+```
+
+모듈 계약:
+
+```text
+Module-Id       indicator.vwap
+Default Panel   price.main
+Data            OHLCV + TradingDate
+Contributions   5 × Polyline
+```
+
+ObjectId:
+
+```text
+vwap.value
+vwap.upper1
+vwap.lower1
+vwap.upper2
+vwap.lower2
+```
+
+Property:
+
+```text
+stdDev1                    RecalculateModule
+stdDev2                    RecalculateModule
+vwap.value.stroke          RedrawOnly
+vwap.upper1.stroke         RedrawOnly
+vwap.lower1.stroke         RedrawOnly
+vwap.upper2.stroke         RedrawOnly
+vwap.lower2.stroke         RedrawOnly
+```
+
+Renderer에는 VWAP 전용 분기를 추가하지 않았다.
+
+---
+
+# 9. VwapSeriesRuntime 판정 계약
+
+상태:
+
+```text
+priceVolume
+volume
+priceSquaredVolume
+lastTradingDate
+savedPriceVolume
+savedVolume
+savedPriceSquaredVolume
+savedLastTradingDate
+sourceSequences
+sourceHighs
+sourceLows
+sourceCloses
+sourceVolumes
+sourceTradingDates
+values
+```
+
+판정:
+
+```text
+Unchanged:
+  전체 Sequence/High/Low/Close/Volume/TradingDate 동일
+
+UpdateLast:
+  이전 모든 봉 동일
+  마지막 Sequence 동일
+  마지막 High/Low/Close/Volume/TradingDate 변경 허용
+
+Append:
+  기존 모든 봉 동일
+  마지막 Sequence = committed + 1
+  새 TradingDate이면 Step에서 누적값 reset
+
+Rebuild:
+  rolling snapshot
+  중간 봉 변경
+  기존 배열과 구조 불일치
+```
+
+Open 값은 Legacy VWAP 계산에 사용되지 않으므로 runtime identity 비교 대상에 포함하지 않았다.
+
+---
+
+# 10. 자동검증 결과
+
+검증 기능 HEAD:
+
+```text
+842fccfc8b8a8bc34a4c42294b8dfb4336cc3a7d
+```
+
+Windows Actions:
+
+```text
+ChartKit CSharp Engine
+run 30723966119
+result success
+
+ChartKit CSharp Legacy Inventory
+run 30723966064
+result success
+```
+
+빌드:
+
+```text
+C# product Release build PASS
+errors 0
+OpenTK/OpenTK.GLControl NU1701 경고 2개
+신규 C# 컴파일 경고 0
+```
+
+모듈:
+
+```text
+chart_module_header_contract=PASS module_files=9
+csharp_vwap_module_release_configuration=PASS
+csharp_vwap_module_definition=PASS
+csharp_vwap_module_metadata=PASS
+csharp_vwap_full_parity=PASS
+csharp_vwap_update_parity=PASS
+csharp_vwap_append_parity=PASS
+csharp_vwap_session_reset_parity=PASS
+csharp_vwap_rebuild_parity=PASS
+csharp_vwap_zero_volume_parity=PASS
+csharp_vwap_disabled_zero=PASS
+csharp_vwap_contributions=PASS
+csharp_vwap_panel_contract=PASS
+csharp_vwap_style_override=PASS
+csharp_vwap_parameter_change=PASS
+csharp_vwap_trading_date_contract=PASS
+csharp_vwap_reference_boundary=PASS
+csharp_vwap_module_contracts=PASS
+csharp_engine_verification=PASS
+```
+
+App:
+
+```text
+csharp_app_vwap_module_data=PASS
+csharp_app_vwap_module_parameters=PASS
+csharp_app_vwap_module_style=PASS
+csharp_app_vwap_panel_contract=PASS
+csharp_app_vwap_session_reset=PASS
+csharp_app_vwap_module_roundtrip=PASS
+csharp_app_self_test=PASS
+csharp_desktop_shell_smoke=PASS
+```
+
+Legacy:
+
+```text
+legacy_parity_VWAP=PASS
+legacy_parity_indicator_count=8
+legacy_csharp_indicator_parity=PASS
+```
+
+회귀:
+
+```text
+processed_events=220
+max_queue_depth=26
+multi_symbol_fifo=PASS
+csharp_datasources_no_row_sort=PASS
+csharp_kiwoom_120tick_4000_source_order=PASS
+csharp_kiwoom_equal_hhmm_tick_order=PASS
+csharp_realtime_reconnect_continuity=PASS
+csharp_realtime_builder_survives_reconnect=PASS
+```
+
+Publish:
+
+```text
+PASS
+Artifact ID 8825733497
+SHA256 9ad0b21544dbdf41f4bb445725bfb9eae27c27f83af59584e2ec83c4d2c24a14
+```
+
+`max_queue_depth=26`은 단일 실행 관측값이며 공식 성능 threshold가 아니다.
+
+---
+
+# 11. 수동 검증 절차
+
+## 11-1. 로컬 동기화
 
 ```powershell
 Set-Location "E:\2026\gpt\vb\sciaChart\ChartKit"
 
 git status
 git fetch origin
-git switch csharp/standalone-engine
-git pull --ff-only origin csharp/standalone-engine
+git switch csharp/module-platform-p2-vwap-parity
+git pull --ff-only origin csharp/module-platform-p2-vwap-parity
 
-git status
 git log -3 --oneline
 git rev-parse HEAD
 ```
 
-검증:
+예상:
+
+```text
+최상단: 이 인수인계 갱신 커밋
+그 아래: 842fccf Document VWAP module parity standard
+```
+
+## 11-2. 로컬 자동검증 재실행
 
 ```powershell
 .\scripts\verify_chart_module_headers.ps1
 
-dotnet build .\csharp_chartkit\ChartKit.CSharp.sln -c Release
+dotnet build .\csharp_chartkit\ChartKit.CSharp.sln `
+  -c Release `
+  --no-incremental
 
 dotnet run `
   --project .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj `
@@ -461,13 +712,96 @@ dotnet run `
   --count 120
 ```
 
+## 11-3. 화면 smoke
+
+새 임시 Profile로 실행한다.
+
+검증:
+
+```text
+VWAP만 활성화
+modules 1/9
+plan 5
+faults 0
+
+Legacy VWAP Value와 Module vwap.value 중첩
+Legacy Upper1/Lower1과 Module upper1/lower1 중첩
+Legacy Upper2/Lower2와 Module upper2/lower2 중첩
+StdDev 1.0 / 2.0 기본값
+StdDev 변경 시 5선 재계산
+색상 변경 즉시 반영
+종료·재실행 후 On/StdDev/색상 복원
+```
+
+## 11-4. 다일 replay
+
+최소 3거래일 데이터 사용:
+
+```text
+거래일 1: 40봉 이상
+거래일 2: 40봉 이상
+거래일 3: 첫 봉 volume 0 또는 거래량 변형
+```
+
+필수 확인:
+
+```text
+거래일 2 첫 봉의 VWAP = 그 봉 typical price
+전일 누적이 거래일 2로 넘어오지 않음
+거래일 3 volume 0 첫 봉은 5개 값 NaN
+거래일 3 다음 양수 volume 봉은 새 세션 기준 계산
+화면 이동·축소·확대 후 세션 경계 유지
+rolling snapshot에서도 Legacy와 일치
+```
+
+스크린샷 또는 화면 관측 결과를 PR #20 comment에 기록한다.
+
 ---
 
-# 9. 다음 작업 순서
+# 12. PR #20 완료 순서
 
-## P0. 다음 거래일 실데이터 검증
+수동 smoke 성공 후:
 
-대표종목 `005930` 또는 `000660`, 1분봉으로 확인한다.
+```text
+1. git rev-parse HEAD
+2. PR #20 head SHA 일치 확인
+3. 수동 검증 결과 PR comment
+4. Draft → Ready
+5. expected-head merge
+6. csharp/standalone-engine pull
+7. 전체 검증 재실행
+8. checkpoint/csharp-module-platform-p2-vwap-pass 생성
+9. session_handoff.md 병합 상태 갱신
+```
+
+병합 명령은 검증 HEAD가 정확히 일치할 때만 실행한다.
+
+예상 병합 후 상태:
+
+```text
+P2 Legacy 8개 지표 모듈 이전 완료
+SMA
+RSI
+MACD
+SuperTrend
+JMA
+OBV
+Disparity
+VWAP
+```
+
+---
+
+# 13. 실제 장중 검증 미완료 P0
+
+대표종목:
+
+```text
+005930 삼성전자
+000660 SK하이닉스
+```
+
+장중 WebSocket:
 
 ```text
 day trading
@@ -480,7 +814,7 @@ errors 0
 sequence 역전 0
 ```
 
-## P0-2. 실제 물리 재연결
+물리 재연결:
 
 ```text
 connection attempts +1
@@ -490,85 +824,109 @@ reconnecting → registered → receiving
 다음 봉 정상 append
 ```
 
-## P0-3. soak recorder 및 soak
-
-```text
-working/private/managed memory
-threads
-handles/GDI
-queue depth/max
-accepted/processed/published/errors
-realtime diagnostics
-latency
-CSV/JSONL 기록
-종료 요약 및 threshold 판정
-```
-
-검증 범위:
+soak:
 
 ```text
 1종목 6시간
 20종목 6시간
 100종목 replay 6시간
 종목·주기 100회 변경
-최소화·복원
+working/private/managed memory
+threads
+handles/GDI
+queue depth/max
+accepted/processed/published/errors
+latency
+CSV/JSONL
 ```
 
-## P1. 모듈 플랫폼 첫 수직 경로
-
-```text
-1. ChartKit.Modules.Abstractions
-2. ChartKit.Scene
-3. ChartKit.ModuleHost / Registry
-4. ChartProfile / Persistence
-5. ChartKit.Composition / ChartRenderPlan
-6. PlatformProbeModule
-7. 공용 Context Menu
-8. 공용 Quick Button
-9. 공용 Property Inspector
-10. 기존 SMA Module 이전
-11. RSI → MACD → SuperTrend 이전
-```
-
-`PlatformProbeModule` 완료 기준:
-
-```text
-표준 파일 상단 계약
-Registry 등록
-Profile On/Off
-숫자·색상 Property
-Command metadata
-Polyline Contribution
-SceneCompiler
-RenderPlan
-Renderer 출력
-저장·복원
-비활성 계산 0
-오류 격리
-CI 검사 통과
-```
-
-실시간 P0 검증과 모듈 플랫폼 P1은 분리된 브랜치에서 진행한다.
+**scripted reconnect PASS를 실제 물리 reconnect PASS라고 표현하지 않는다.**
 
 ---
 
-# 10. 하지 말아야 할 실수
+# 14. 거래일 판정 계약
+
+대표종목 기반 판정:
 
 ```text
-틱 데이터를 시간으로 정렬
-동일 HHmm 행 삭제
-오류를 감추기 위해 틱 행 제거
-과거 휴장일 판정에 분봉 사용
-대표종목 probe로 realtime seed 덮어쓰기
-조회 실패를 휴장으로 판정
-동일 시각/가격/수량만으로 실시간 체결 중복 제거
-재연결마다 RealtimeCandleBuilder 초기화
-Renderer에 RSI/전략/호가 등 기능별 분기 추가
-MainForm에 기능별 Toggle 메서드 추가
-모듈에서 SKCanvas 직접 사용
-기능 파일 상단 <chart-module> 계약 생략
-기능마다 별도 csproj 남발
-CI 실패 코드를 로컬 pull 대상으로 안내
-Draft PR #3 병합
-실데이터 검증 전에 PR #3 병합
+오늘:
+  최신 1분봉 1건
+  하나라도 오늘 날짜 → TradingDay
+  둘 다 정상이나 오늘 날짜 없음 → NoTradingDay
+
+과거:
+  일봉 1건
+  base_dt 정확히 일치 → TradingDay
+  둘 다 정상이나 정확한 날짜 없음 → NoTradingDay
+
+실패·일부 실패·미래 날짜:
+  Unknown
 ```
+
+중요:
+
+```text
+오늘은 분봉, 과거는 일봉
+과거 휴장 판정에 분봉 연속조회 금지
+대표종목 probe는 realtime seed를 저장·덮어쓰기 금지
+실제 realtime event가 오면 no-data 판정보다 TradingDay 우선
+```
+
+이 거래일 판정 서비스와 `ChartPrimaryBar.TradingDate`는 역할이 다르다.
+
+```text
+TradingDayProbe: 시장 거래일 여부 판정
+ChartPrimaryBar.TradingDate: 각 봉이 속한 세션 경계 전달
+```
+
+---
+
+# 15. 잔존 경고와 성능 판정
+
+잔존 빌드 경고:
+
+```text
+OpenTK 3.1.0 NU1701
+OpenTK.GLControl 3.1.0 NU1701
+```
+
+현재 허용한다. 신규 C# nullable/컴파일 경고는 허용하지 않는다.
+
+금지:
+
+```text
+단일 queue depth 값으로 성능 개선/악화 단정
+queue depth가 낮다고 soak PASS 선언
+queue depth가 높다고 기능 PR 자동 실패 처리
+```
+
+향후 soak recorder에서 workload와 함께 threshold를 정의한다.
+
+---
+
+# 16. 다음 세션 완료 조건
+
+최소 완료 목표:
+
+```text
+로컬 자동검증 재확인
+Legacy-vs-module 5선 중첩 smoke PASS
+StdDev 변경 PASS
+색상 변경 PASS
+Profile 종료·재실행 복원 PASS
+다일 replay session reset 화면 검증 PASS
+PR #20 comment 기록
+```
+
+병합까지 진행할 경우:
+
+```text
+PR #20 head와 검증 SHA 정확히 일치
+Ready 전환
+expected-head merge
+csharp/standalone-engine 전체 회귀 PASS
+checkpoint/csharp-module-platform-p2-vwap-pass 생성
+인수인계 문서 병합 상태 갱신
+```
+
+PR #3 관련 실제 장중 WebSocket·물리 재연결·soak는 별도 P0이며 계속 미완료다.

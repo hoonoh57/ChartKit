@@ -2,6 +2,7 @@ namespace ChartKit.CSharp.Modules.Abstractions;
 
 public readonly record struct ChartPrimaryBar(
     long Sequence,
+    DateOnly TradingDate,
     double Open,
     double High,
     double Low,
@@ -9,6 +10,28 @@ public readonly record struct ChartPrimaryBar(
     long Volume,
     bool IsFinal)
 {
+    public ChartPrimaryBar(
+        long sequence,
+        double open,
+        double high,
+        double low,
+        double close,
+        long volume,
+        bool isFinal)
+        : this(
+            sequence,
+            DateOnly.MinValue,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            isFinal)
+    {
+    }
+
+    public bool HasTradingDate => TradingDate != DateOnly.MinValue;
+
     public void Validate()
     {
         if (!double.IsFinite(Open) ||

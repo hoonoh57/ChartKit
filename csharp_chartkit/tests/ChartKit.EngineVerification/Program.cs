@@ -21,6 +21,7 @@ try
     JmaModuleParityVerification.Run();
     ObvModuleParityVerification.Run();
     DisparityModuleParityVerification.Run();
+    VwapModuleParityVerification.Run();
     await MultiSymbolVerification.RunAsync();
     await RenderingVerification.RunAsync();
     await RenderPlanRenderingVerification.RunAsync();

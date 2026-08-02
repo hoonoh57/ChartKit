@@ -28,6 +28,7 @@ public sealed partial class SkiaChartRenderer : IDisposable
     private readonly SKPath _downVolumePath = new();
     private readonly SKPath _seriesPath = new();
     private readonly SKPath _histogramPath = new();
+    private int _rendering;
     private int _disposed;
 
     public SkiaChartRenderer()
@@ -58,36 +59,50 @@ public sealed partial class SkiaChartRenderer : IDisposable
         ChartFrame frame,
         ChartRenderOptions? options = null)
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        ArgumentNullException.ThrowIfNull(canvas);
-        ArgumentNullException.ThrowIfNull(snapshot);
-        ArgumentNullException.ThrowIfNull(frame);
-        ChartRenderOptions settings = options ?? ChartRenderOptions.Default;
-        settings.Validate();
-
-        ChartRectF bounds = frame.Bounds;
-        canvas.Save();
-        canvas.ClipRect(ToSkRect(bounds));
-        canvas.DrawRect(ToSkRect(bounds), _backgroundPaint);
-        if (snapshot.Candles.Length == 0 || frame.Window.IsEmpty)
-        {
-            canvas.Restore();
+        if (Interlocked.CompareExchange(ref _rendering, 1, 0) != 0)
             return;
-        }
-        if (frame.Window.StartIndex < 0 || frame.Window.Count <= 0 ||
-            frame.Window.EndExclusive > snapshot.Candles.Length)
-        {
-            canvas.Restore();
-            throw new ArgumentOutOfRangeException(nameof(frame));
-        }
 
-        DrawGrid(canvas, frame, settings.ShowDateBoundaries);
-        DrawCandles(canvas, snapshot, frame);
-        DrawIndicatorSeries(canvas, snapshot, frame);
-        if (settings.ShowAxes)
-            DrawAxes(canvas, frame, settings.ShowDateBoundaries);
-        if (settings.ShowText) DrawHeader(canvas, snapshot, frame);
-        canvas.Restore();
+        try
+        {
+            ObjectDisposedException.ThrowIf(
+                Volatile.Read(ref _disposed) != 0,
+                this);
+            ArgumentNullException.ThrowIfNull(canvas);
+            ArgumentNullException.ThrowIfNull(snapshot);
+            ArgumentNullException.ThrowIfNull(frame);
+            ChartRenderOptions settings = options ?? ChartRenderOptions.Default;
+            settings.Validate();
+
+            ChartRectF bounds = frame.Bounds;
+            canvas.Save();
+            try
+            {
+                canvas.ClipRect(ToSkRect(bounds));
+                canvas.DrawRect(ToSkRect(bounds), _backgroundPaint);
+                if (snapshot.Candles.Length == 0 || frame.Window.IsEmpty)
+                    return;
+                if (frame.Window.StartIndex < 0 || frame.Window.Count <= 0 ||
+                    frame.Window.EndExclusive > snapshot.Candles.Length)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(frame));
+                }
+
+                DrawGrid(canvas, frame, settings.ShowDateBoundaries);
+                DrawCandles(canvas, snapshot, frame);
+                DrawIndicatorSeries(canvas, snapshot, frame);
+                if (settings.ShowAxes)
+                    DrawAxes(canvas, frame, settings.ShowDateBoundaries);
+                if (settings.ShowText) DrawHeader(canvas, snapshot, frame);
+            }
+            finally
+            {
+                canvas.Restore();
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _rendering, 0);
+        }
     }
 
     private void DrawGrid(
@@ -311,6 +326,11 @@ public sealed partial class SkiaChartRenderer : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
+        var spin = new SpinWait();
+        while (Volatile.Read(ref _rendering) != 0)
+            spin.SpinOnce();
+
         _backgroundPaint.Dispose();
         _gridPaint.Dispose();
         _dateBoundaryPaint.Dispose();
