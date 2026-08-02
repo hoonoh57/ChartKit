@@ -124,10 +124,13 @@ csharp_app_self_test=PASS
 
 # 4. 다음 로컬 검증
 
+검증 대상은 pull 직후의 `csharp/symbol-switch-cancellation` HEAD다. 문서 커밋 때문에 HEAD 값은 계속 변할 수 있으므로 `git rev-parse HEAD`로 기록한다.
+
 ```powershell
 Set-Location "E:\2026\gpt\vb\sciaChart\ChartKit"
 
 git pull --ff-only origin csharp/symbol-switch-cancellation
+git rev-parse HEAD
 
 .\scripts\verify_chart_module_headers.ps1
 
