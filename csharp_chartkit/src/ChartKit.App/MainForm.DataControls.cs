@@ -64,8 +64,9 @@ internal sealed partial class MainForm
         {
             if (e.KeyCode != Keys.Enter) return;
             e.SuppressKeyPress = true;
+            string symbolText = _dataSymbolEditor.Text;
             await ExecuteDataCommandAsync(
-                () => CommitSymbolAsync(_dataSymbolEditor.Text));
+                () => CommitSymbolAsync(symbolText));
         };
 
         _symbolHistoryButton.AutoSize = false;
@@ -110,7 +111,9 @@ internal sealed partial class MainForm
         {
             if (e.KeyCode != Keys.Enter) return;
             e.SuppressKeyPress = true;
-            await ExecuteDataCommandAsync(ApplyHistoryCountAndReloadAsync);
+            string countText = _historyCountEditor.Text;
+            await ExecuteDataCommandAsync(
+                () => ApplyHistoryCountAndReloadAsync(countText));
         };
     }
 
@@ -161,9 +164,15 @@ internal sealed partial class MainForm
             _toolbar.ResumeLayout(performLayout: false);
         }
 
-        _reloadDataButton.ToolTipText = "종목·주기·총 봉수를 적용해 다시 조회";
+        _reloadDataButton.ToolTipText =
+            "종목·주기·총 봉수를 적용합니다. 처리 중이면 다음 요청으로 대기합니다.";
         _reloadDataButton.Click += async (_, _) =>
-            await ExecuteDataCommandAsync(ApplyEditorsAndReloadAsync);
+        {
+            string symbolText = _dataSymbolEditor.Text;
+            string countText = _historyCountEditor.Text;
+            await ExecuteDataCommandAsync(
+                () => ApplyEditorsAndReloadAsync(symbolText, countText));
+        };
     }
 
     private void RebuildDataContextMenu()
@@ -205,15 +214,15 @@ internal sealed partial class MainForm
             historyMenu.DropDownItems.Add(
                 count.ToString("N0", CultureInfo.InvariantCulture),
                 null,
-                async (_, _) =>
-                {
-                    _requestedHistoryCount = captured;
-                    SynchronizeDataControls();
-                    await ExecuteDataCommandAsync(
-                        () => ReloadActiveSymbolsAsync(
+                async (_, _) => await ExecuteDataCommandAsync(
+                    async () =>
+                    {
+                        _requestedHistoryCount = captured;
+                        SynchronizeDataControls();
+                        await ReloadActiveSymbolsAsync(
                             _workspace.Timeframe,
-                            reloadAll: true));
-                });
+                            reloadAll: true);
+                    }));
         }
         _chartContextMenu.Items.Add(historyMenu);
 
@@ -233,11 +242,13 @@ internal sealed partial class MainForm
         _chartContextMenu.Items.Add(barsMenu);
     }
 
-    private async Task ApplyEditorsAndReloadAsync()
+    private async Task ApplyEditorsAndReloadAsync(
+        string symbolText,
+        string countText)
     {
-        string symbol = NormalizeSymbol(_dataSymbolEditor.Text);
+        string symbol = NormalizeSymbol(symbolText);
         int count = ParseBoundedCount(
-            _historyCountEditor.Text,
+            countText,
             "총 다운로드 봉수",
             MinimumHistoryCount,
             MaximumHistoryCount);
@@ -251,10 +262,10 @@ internal sealed partial class MainForm
             reloadAll: !added || _activeSymbols.Count > 1);
     }
 
-    private async Task ApplyHistoryCountAndReloadAsync()
+    private async Task ApplyHistoryCountAndReloadAsync(string countText)
     {
         _requestedHistoryCount = ParseBoundedCount(
-            _historyCountEditor.Text,
+            countText,
             "총 다운로드 봉수",
             MinimumHistoryCount,
             MaximumHistoryCount);
@@ -368,6 +379,12 @@ internal sealed partial class MainForm
             _chart.Focus();
             _chart.Invalidate();
         }
+        catch
+        {
+            if (!_stop.IsCancellationRequested)
+                _frameTimer.Start();
+            throw;
+        }
         finally
         {
             _reloadGate.Release();
@@ -398,7 +415,8 @@ internal sealed partial class MainForm
             {
                 BeginInvoke(() =>
                 {
-                    _statusLabel.Text = "실시간 오류: " + exception.Message;
+                    if (!IsDisposed)
+                        _statusLabel.Text = "실시간 오류: " + exception.Message;
                 });
             }
         }
@@ -408,8 +426,9 @@ internal sealed partial class MainForm
     {
         try
         {
-            _reloadDataButton.Enabled = false;
-            await command();
+            DataRequestOutcome outcome = await EnqueueDataCommandAsync(command);
+            if (outcome == DataRequestOutcome.Coalesced)
+                return;
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested)
         {
@@ -418,10 +437,6 @@ internal sealed partial class MainForm
         {
             SynchronizeDataControls();
             ShowFailure("차트 데이터 명령 실패", exception);
-        }
-        finally
-        {
-            if (!IsDisposed) _reloadDataButton.Enabled = true;
         }
     }
 
