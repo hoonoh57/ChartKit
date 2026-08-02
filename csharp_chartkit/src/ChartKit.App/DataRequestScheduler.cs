@@ -38,10 +38,12 @@ internal sealed class DataRequestScheduler : IDisposable
 
     private readonly object _sync = new();
     private readonly CancellationTokenSource _stop;
+    private readonly CancellationToken _token;
     private Request? _running;
     private Request? _pending;
     private bool _runnerActive;
     private bool _disposed;
+    private int _stopDisposed;
     private long _totalEnqueued;
     private long _totalCompleted;
     private long _totalCoalesced;
@@ -52,6 +54,7 @@ internal sealed class DataRequestScheduler : IDisposable
     public DataRequestScheduler(CancellationToken applicationToken)
     {
         _stop = CancellationTokenSource.CreateLinkedTokenSource(applicationToken);
+        _token = _stop.Token;
     }
 
     public event Action? StateChanged;
@@ -62,6 +65,7 @@ internal sealed class DataRequestScheduler : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(description);
         ArgumentNullException.ThrowIfNull(operation);
+        _token.ThrowIfCancellationRequested();
 
         var request = new Request(description.Trim(), operation);
         Request? coalesced = null;
@@ -124,18 +128,20 @@ internal sealed class DataRequestScheduler : IDisposable
     public void Dispose()
     {
         Request? pending;
+        bool disposeStop;
         lock (_sync)
         {
             if (_disposed) return;
             _disposed = true;
             pending = _pending;
             _pending = null;
+            disposeStop = !_runnerActive;
         }
 
-        pending?.Completion.TrySetCanceled(_stop.Token);
+        pending?.Completion.TrySetCanceled(_token);
         _stop.Cancel();
         RaiseStateChanged();
-        _stop.Dispose();
+        if (disposeStop) DisposeStop();
     }
 
     private async Task RunLoopAsync()
@@ -143,37 +149,62 @@ internal sealed class DataRequestScheduler : IDisposable
         while (true)
         {
             Request? request;
+            Request? cancelledPending = null;
+            bool stopRunner = false;
+
             lock (_sync)
             {
-                request = _pending;
-                _pending = null;
-                if (request is null)
+                if (_disposed || _token.IsCancellationRequested)
                 {
+                    cancelledPending = _pending;
+                    _pending = null;
                     _running = null;
                     _runnerActive = false;
-                    RaiseStateChangedAfterUnlock();
-                    return;
+                    stopRunner = true;
+                    request = null;
                 }
+                else
+                {
+                    request = _pending;
+                    _pending = null;
+                    if (request is null)
+                    {
+                        _running = null;
+                        _runnerActive = false;
+                        stopRunner = true;
+                    }
+                    else
+                    {
+                        request.StartedTimestamp = Stopwatch.GetTimestamp();
+                        long waitMilliseconds = ElapsedMilliseconds(
+                            request.EnqueuedTimestamp,
+                            request.StartedTimestamp);
+                        _maxPendingWaitMilliseconds = Math.Max(
+                            _maxPendingWaitMilliseconds,
+                            waitMilliseconds);
+                        _running = request;
+                    }
+                }
+            }
 
-                request.StartedTimestamp = Stopwatch.GetTimestamp();
-                long waitMilliseconds = ElapsedMilliseconds(
-                    request.EnqueuedTimestamp,
-                    request.StartedTimestamp);
-                _maxPendingWaitMilliseconds = Math.Max(
-                    _maxPendingWaitMilliseconds,
-                    waitMilliseconds);
-                _running = request;
+            if (cancelledPending is not null)
+                cancelledPending.Completion.TrySetCanceled(_token);
+            if (stopRunner)
+            {
+                RaiseStateChanged();
+                if (_disposed) DisposeStop();
+                return;
             }
 
             RaiseStateChanged();
             try
             {
-                await request.Operation(_stop.Token);
+                await request!.Operation(_token);
                 request.Completion.TrySetResult(DataRequestOutcome.Completed);
             }
-            catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+            catch (OperationCanceledException) when (_token.IsCancellationRequested)
             {
-                request.Completion.TrySetCanceled(_stop.Token);
+                request.Completion.TrySetCanceled(_token);
             }
             catch (Exception exception)
             {
@@ -200,6 +231,12 @@ internal sealed class DataRequestScheduler : IDisposable
         }
     }
 
+    private void DisposeStop()
+    {
+        if (Interlocked.Exchange(ref _stopDisposed, 1) == 0)
+            _stop.Dispose();
+    }
+
     private static long ElapsedMilliseconds(long start, long end) =>
         start <= 0 || end <= start
             ? 0
@@ -210,7 +247,4 @@ internal sealed class DataRequestScheduler : IDisposable
         Action? handler = StateChanged;
         handler?.Invoke();
     }
-
-    private void RaiseStateChangedAfterUnlock() =>
-        ThreadPool.QueueUserWorkItem(_ => RaiseStateChanged());
 }
