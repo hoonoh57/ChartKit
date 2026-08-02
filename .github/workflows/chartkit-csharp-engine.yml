@@ -1,0 +1,127 @@
+name: ChartKit CSharp Engine
+
+on:
+  pull_request:
+    branches:
+      - improve/chart-engine-hardening
+    paths:
+      - 'csharp_chartkit/**'
+      - 'docs/chart-module-platform/**'
+      - 'scripts/verify_chart_module_headers.ps1'
+      - '.github/workflows/chartkit-csharp-engine.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verify CSharp product boundary
+        shell: pwsh
+        run: |
+          $invalid = Get-ChildItem .\csharp_chartkit\src -Recurse -Filter *.csproj |
+            Select-String -Pattern '\.vbproj|ChartKit\.vbproj'
+          if ($invalid) {
+            $invalid | ForEach-Object { Write-Error $_.Line }
+            throw 'CSharp product projects must not reference VB projects.'
+          }
+          $solution = Get-Content .\csharp_chartkit\ChartKit.CSharp.sln -Raw
+          if ($solution -match '\.vbproj|LegacyParity') {
+            throw 'CSharp product solution contains a migration-only dependency.'
+          }
+          Write-Host 'csharp_product_boundary=PASS'
+
+      - name: Verify chart module file contracts
+        shell: pwsh
+        run: .\scripts\verify_chart_module_headers.ps1
+
+      - name: Reject DataSources row-reordering APIs
+        shell: pwsh
+        run: |
+          $patterns = @(
+            '\.Sort\s*\(',
+            'Array\.Sort\s*\(',
+            '\bOrderBy\s*\(',
+            '\bThenBy\s*\(',
+            '\bSortedDictionary\s*<'
+          )
+          $matches = Get-ChildItem .\csharp_chartkit\src\ChartKit.DataSources `
+              -Recurse -Filter *.cs |
+            Select-String -Pattern $patterns
+          if ($matches) {
+            $matches | ForEach-Object {
+              Write-Error "$($_.Path):$($_.LineNumber): $($_.Line.Trim())"
+            }
+            throw 'DataSources must preserve provider array order. Only explicit whole-array reversal is allowed.'
+          }
+          Write-Host 'csharp_datasources_no_row_sort=PASS'
+
+      - name: Restore CSharp product solution
+        run: dotnet restore .\csharp_chartkit\ChartKit.CSharp.sln
+      - name: Build CSharp product solution
+        run: dotnet build .\csharp_chartkit\ChartKit.CSharp.sln -c Release --no-restore
+      - name: Run CSharp verification
+        run: dotnet run --project .\csharp_chartkit\tests\ChartKit.EngineVerification\ChartKit.EngineVerification.csproj -c Release --no-build
+      - name: Run CSharp application self-test
+        run: dotnet run --project .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-build -- --self-test --count 120
+      - name: Run CSharp desktop shell smoke test
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:RUNNER_TEMP 'chartkit-ui-smoke.out.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'chartkit-ui-smoke.err.log'
+          $arguments = @(
+            'run',
+            '--project', '.\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj',
+            '-c', 'Release',
+            '--no-build',
+            '--',
+            '--replay',
+            '--symbols', 'S001,S002',
+            '--timeframe', '1m',
+            '--count', '1000'
+          )
+          $process = Start-Process `
+            -FilePath 'dotnet' `
+            -ArgumentList $arguments `
+            -PassThru `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr | Write-Error }
+              throw "CSharp desktop shell exited during startup with code $($process.ExitCode)."
+            }
+            Write-Host 'csharp_desktop_shell_smoke=PASS'
+          }
+          finally {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+            }
+          }
+
+      - name: Restore legacy parity verifier
+        run: dotnet restore .\csharp_chartkit\migration\LegacyParity\LegacyParity.csproj
+      - name: Build legacy parity verifier
+        run: dotnet build .\csharp_chartkit\migration\LegacyParity\LegacyParity.csproj -c Release --no-restore
+      - name: Run legacy parity verifier
+        run: dotnet run --project .\csharp_chartkit\migration\LegacyParity\LegacyParity.csproj -c Release --no-build
+
+      - name: Publish standalone CSharp application
+        run: dotnet publish .\csharp_chartkit\src\ChartKit.App\ChartKit.App.csproj -c Release --no-restore -o .\artifacts\ChartKit.CSharp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChartKit-CSharp-Windows
+          path: .\artifacts\ChartKit.CSharp
+          if-no-files-found: error

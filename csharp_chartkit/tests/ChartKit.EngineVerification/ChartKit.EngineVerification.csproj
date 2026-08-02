@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ChartKit.Charting\ChartKit.Charting.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Contracts\ChartKit.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Engine\ChartKit.Engine.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Rendering\ChartKit.Rendering.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.DataSources\ChartKit.DataSources.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Modules.Abstractions\ChartKit.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Scene\ChartKit.Scene.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.ModuleHost\ChartKit.ModuleHost.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Modules.Platform\ChartKit.Modules.Platform.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Modules.Indicators\ChartKit.Modules.Indicators.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Composition\ChartKit.Composition.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.Persistence\ChartKit.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\ChartKit.UiModel\ChartKit.UiModel.csproj" />
+  </ItemGroup>
+</Project>
