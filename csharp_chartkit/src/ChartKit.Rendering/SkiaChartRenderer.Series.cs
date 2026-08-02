@@ -51,6 +51,7 @@ public sealed partial class SkiaChartRenderer
         int pointStart = Math.Min(frame.Window.StartIndex, series.Points.Length);
         int pointEnd = Math.Min(frame.Window.EndExclusive, series.Points.Length);
         bool active = false;
+        bool hasGeometry = false;
 
         for (int pointIndex = pointStart;
              pointIndex < pointEnd;
@@ -68,15 +69,23 @@ public sealed partial class SkiaChartRenderer
             float y = panel == 0
                 ? frame.PriceY(value)
                 : frame.PanelY(panel, value);
+            if (!float.IsFinite(x) || !float.IsFinite(y))
+            {
+                active = false;
+                continue;
+            }
+
             if (active) _seriesPath.LineTo(x, y);
             else
             {
                 _seriesPath.MoveTo(x, y);
                 active = true;
             }
+            hasGeometry = true;
         }
 
-        canvas.DrawPath(_seriesPath, paint);
+        if (hasGeometry)
+            canvas.DrawPath(_seriesPath, paint);
     }
 
     private void DrawHistogram(
@@ -94,8 +103,10 @@ public sealed partial class SkiaChartRenderer
         float zero = panel == 0
             ? frame.PriceY(0f)
             : frame.PanelY(panel, 0f);
+        if (!float.IsFinite(zero)) zero = rect.Bottom;
         zero = Math.Clamp(zero, rect.Top, rect.Bottom);
         float halfWidth = Math.Max(0.5f, frame.BodyWidth * 0.36f);
+        bool hasGeometry = false;
 
         for (int pointIndex = pointStart;
              pointIndex < pointEnd;
@@ -109,16 +120,26 @@ public sealed partial class SkiaChartRenderer
             float y = panel == 0
                 ? frame.PriceY(value)
                 : frame.PanelY(panel, value);
+            if (!float.IsFinite(x) || !float.IsFinite(y)) continue;
+
             _histogramPath.AddRect(new SKRect(
                 x - halfWidth,
                 Math.Min(y, zero),
                 x + halfWidth,
                 Math.Max(y, zero)));
+            hasGeometry = true;
         }
 
+        if (!hasGeometry) return;
         SKPaintStyle original = paint.Style;
         paint.Style = SKPaintStyle.Fill;
-        canvas.DrawPath(_histogramPath, paint);
-        paint.Style = original;
+        try
+        {
+            canvas.DrawPath(_histogramPath, paint);
+        }
+        finally
+        {
+            paint.Style = original;
+        }
     }
 }
