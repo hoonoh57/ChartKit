@@ -30,15 +30,34 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
         if (normalizedQuery.Length == 0)
             return Array.Empty<InstrumentSearchResult>();
 
-        return catalog
-            .Select(item => new RankedInstrument(item, Score(item, normalizedQuery)))
-            .Where(static item => item.Score < int.MaxValue)
-            .OrderBy(static item => item.Score)
-            .ThenBy(static item => item.Value.DisplayName, StringComparer.Ordinal)
-            .ThenBy(static item => item.Value.Symbol, StringComparer.Ordinal)
-            .Take(requestedLimit)
-            .Select(static item => item.Value)
-            .ToArray();
+        var ranked = new List<RankedInstrument>(requestedLimit);
+        foreach (InstrumentSearchResult item in catalog)
+        {
+            int score = Score(item, normalizedQuery);
+            if (score == int.MaxValue) continue;
+
+            int insertAt = ranked.Count;
+            for (int index = 0; index < ranked.Count; index++)
+            {
+                if (score < ranked[index].Score)
+                {
+                    insertAt = index;
+                    break;
+                }
+            }
+
+            if (insertAt >= requestedLimit && ranked.Count >= requestedLimit)
+                continue;
+
+            ranked.Insert(insertAt, new RankedInstrument(item, score));
+            if (ranked.Count > requestedLimit)
+                ranked.RemoveAt(ranked.Count - 1);
+        }
+
+        var output = new InstrumentSearchResult[ranked.Count];
+        for (int index = 0; index < ranked.Count; index++)
+            output[index] = ranked[index].Value;
+        return output;
     }
 
     private async Task<InstrumentSearchResult[]> EnsureInstrumentCatalogAsync(
@@ -53,8 +72,8 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
             cached = _instrumentCatalog;
             if (cached is not null) return cached;
 
-            var bySymbol = new Dictionary<string, InstrumentSearchResult>(
-                StringComparer.Ordinal);
+            var catalog = new List<InstrumentSearchResult>();
+            var symbolIndexes = new Dictionary<string, int>(StringComparer.Ordinal);
             List<Exception>? optionalFailures = null;
 
             foreach (InstrumentMarket market in InstrumentMarkets)
@@ -63,7 +82,8 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
                 {
                     await AppendMarketAsync(
                             market,
-                            bySymbol,
+                            catalog,
+                            symbolIndexes,
                             cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -74,7 +94,7 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
                 }
             }
 
-            if (bySymbol.Count == 0)
+            if (catalog.Count == 0)
             {
                 if (optionalFailures is { Count: > 0 })
                 {
@@ -87,10 +107,7 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
                     "Kiwoom instrument catalog was empty.");
             }
 
-            cached = bySymbol.Values
-                .OrderBy(static item => item.DisplayName, StringComparer.Ordinal)
-                .ThenBy(static item => item.Symbol, StringComparer.Ordinal)
-                .ToArray();
+            cached = catalog.ToArray();
             Volatile.Write(ref _instrumentCatalog, cached);
             return cached;
         }
@@ -102,7 +119,8 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
 
     private async Task AppendMarketAsync(
         InstrumentMarket market,
-        Dictionary<string, InstrumentSearchResult> destination,
+        List<InstrumentSearchResult> destination,
+        Dictionary<string, int> symbolIndexes,
         CancellationToken cancellationToken)
     {
         string body = JsonSerializer.Serialize(new Dictionary<string, string>
@@ -182,10 +200,14 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
                     displayName,
                     resolvedMarket,
                     nxtEnabled);
-                if (!destination.TryGetValue(symbol, out InstrumentSearchResult? current) ||
-                    IsPreferred(candidate, current))
+                if (!symbolIndexes.TryGetValue(symbol, out int existingIndex))
                 {
-                    destination[symbol] = candidate;
+                    symbolIndexes.Add(symbol, destination.Count);
+                    destination.Add(candidate);
+                }
+                else if (IsPreferred(candidate, destination[existingIndex]))
+                {
+                    destination[existingIndex] = candidate;
                 }
             }
 
@@ -234,15 +256,31 @@ public sealed partial class KiwoomRestDataSource : IInstrumentSearchSource
     private static string NormalizeCatalogSymbol(string value)
     {
         string symbol = value.Trim().ToUpperInvariant();
-        if (symbol.Length == 7 && symbol[0] == 'A' &&
-            symbol.Skip(1).All(char.IsDigit))
-            symbol = symbol[1..];
+        if (symbol.Length == 7 && symbol[0] == 'A')
+        {
+            bool numericSuffix = true;
+            for (int index = 1; index < symbol.Length; index++)
+            {
+                if (char.IsDigit(symbol[index])) continue;
+                numericSuffix = false;
+                break;
+            }
+            if (numericSuffix) symbol = symbol[1..];
+        }
+
         int suffix = symbol.IndexOf('_');
         return suffix > 0 ? symbol[..suffix] : symbol;
     }
 
-    private static bool IsSixDigitKrxSymbol(string value) =>
-        value.Length == 6 && value.All(char.IsDigit);
+    private static bool IsSixDigitKrxSymbol(string value)
+    {
+        if (value.Length != 6) return false;
+        foreach (char character in value)
+        {
+            if (!char.IsDigit(character)) return false;
+        }
+        return true;
+    }
 
     private readonly record struct InstrumentMarket(
         string Code,
