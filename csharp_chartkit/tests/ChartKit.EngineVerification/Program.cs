@@ -30,6 +30,7 @@ try
     await ReplayDataVerification.RunAsync();
     await KiwoomSessionVerification.RunAsync();
     await KiwoomHistoryVerification.RunAsync();
+    await InstrumentSearchVerification.RunAsync();
     await KiwoomTickSourceOrderVerification.RunAsync();
     await TradingDayProbeVerification.RunAsync();
     RealtimeBuilderVerification.Run();
