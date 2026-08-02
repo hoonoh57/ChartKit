@@ -72,11 +72,11 @@ internal sealed partial class MainForm
 
     private string BuildDataRequestDescription()
     {
-        string symbol = _dataSymbolEditor.Text.Trim();
+        string symbol = (_dataSymbolEditor.Text ?? string.Empty).Trim();
         if (symbol.Length == 0) symbol = _selectedSymbol;
-        string timeframe = _dataTimeframeEditor.Text.Trim();
+        string timeframe = (_dataTimeframeEditor.Text ?? string.Empty).Trim();
         if (timeframe.Length == 0) timeframe = _workspace.Timeframe.ToString();
-        string count = _historyCountEditor.Text.Trim();
+        string count = (_historyCountEditor.Text ?? string.Empty).Trim();
         return count.Length == 0
             ? $"{symbol} {timeframe}"
             : $"{symbol} {timeframe} {count}봉";
